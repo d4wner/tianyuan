@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 缠论回测系统 - 修复版本
-修复了日期范围不正确和符号验证问题
+修复了日期范围不正确、符号验证、导入错误和配置KeyError问题
 """
 
 import sys
@@ -11,6 +11,7 @@ import argparse
 import logging
 import pandas as pd
 import numpy as np
+import re
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import json
@@ -21,10 +22,10 @@ from typing import Dict, List, Optional, Tuple, Any
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-# 直接导入依赖模块
+# 直接导入依赖模块（彻底移除validate_trading_date）
 try:
-    from src.config import load_config
-    from src.data_fetcher import StockDataAPI
+    from src.config import load_config, save_config
+    from src.data_fetcher import StockDataAPI, DataFetchError
     from src.calculator import ChanlunCalculator
     from src.notifier import DingdingNotifier
     from src.utils import get_last_trading_day, is_trading_hour, get_valid_date_range_str
@@ -65,7 +66,7 @@ class BacktestEngine:
         logger.info("缠论回测引擎初始化完成")
     
     def _initialize_components(self):
-        """初始化所有组件"""
+        """初始化所有组件（配置访问使用get方法）"""
         # 初始化数据API
         data_fetcher_config = self.config.get('data_fetcher', {})
         self.data_api = StockDataAPI(
@@ -77,7 +78,7 @@ class BacktestEngine:
         chanlun_config = self.config.get('chanlun', {})
         self.calculator = ChanlunCalculator(chanlun_config)
         
-        # 初始化通知器
+        # 初始化通知器（兼容无notifications配置）
         self.notifier = DingdingNotifier(self.config)
         
         # 初始化绘图器
@@ -98,13 +99,13 @@ class BacktestEngine:
         :param initial_capital: 初始资金
         :return: 完整回测结果
         """
-        # 🔧🔧🔧🔧🔧🔧 增强日志：记录原始日期参数
+        # 增强日志：记录原始日期参数
         logger.info(f"开始全面回测: {symbol} {timeframe}")
         logger.info(f"用户指定日期范围: {start_date} 至 {end_date}")
         logger.info(f"初始资金: {initial_capital}")
         
         try:
-            # 🔧🔧🔧🔧🔧🔧 防御性检查：验证symbol不是DataFrame
+            # 防御性检查：验证symbol不是DataFrame
             self._validate_symbol_not_dataframe(symbol)
             
             # 1. 数据获取阶段 - 修复日期处理
@@ -141,15 +142,18 @@ class BacktestEngine:
             report_result = self._generate_comprehensive_report(result, symbol, timeframe)
             result['report'] = report_result
             
-            # 5. 图表生成阶段
-            chart_result = self._generate_detailed_charts(result, symbol, timeframe)
+            # 5. 图表生成阶段（兼容无plotter配置）
+            if self.config.get('plotter', {}).get('enabled', False):
+                chart_result = self._generate_detailed_charts(result, symbol, timeframe)
+            else:
+                chart_result = {'success': False, 'error': '图表生成未启用'}
             result['charts'] = chart_result
             
-            # 6. 通知发送阶段
+            # 6. 通知发送阶段（兼容无notifications配置）
             if self.config.get('notifications', {}).get('enabled', False):
                 self._send_notifications(result, symbol, timeframe)
             
-            # 🔧🔧🔧🔧🔧🔧 记录实际使用的日期范围
+            # 记录实际使用的日期范围
             result['actual_date_range'] = {
                 'start': actual_start,
                 'end': actual_end,
@@ -167,24 +171,55 @@ class BacktestEngine:
     
     def _validate_symbol_not_dataframe(self, symbol: Any):
         """
-        防御性检查：确保symbol不是DataFrame或其他无效类型
+        优化的符号验证方法：确保symbol是有效的股票代码而非DataFrame或其他无效类型
+        核心优化：更精准的类型检测、更友好的错误提示、更全面的格式验证
         :param symbol: 要检查的符号
         """
-        # 🔧🔧🔧🔧🔧🔧 修复：防止DataFrame被当作symbol传递
+        # 检查是否为None
         if symbol is None:
+            logger.critical("股票代码参数为None，无法执行回测")
             raise ValueError("股票代码不能为None")
         
-        # 检查是否为DataFrame或其他复杂对象
-        symbol_str = str(symbol)
-        if len(symbol_str) > 100:  # 正常股票代码不会超过20字符
-            logger.error(f"疑似DataFrame被当作股票代码传递: {symbol_str[:100]}...")
-            raise ValueError(f"无效股票代码类型: 疑似DataFrame对象")
+        # 直接检查是否为Pandas DataFrame或Series（核心修复点）
+        if isinstance(symbol, pd.DataFrame):
+            logger.critical(f"检测到Pandas DataFrame作为股票代码，数据形状: {symbol.shape}")
+            raise ValueError("无效股票代码类型: 不能将DataFrame对象作为股票代码传递")
+        elif isinstance(symbol, pd.Series):
+            logger.critical(f"检测到Pandas Series作为股票代码，数据长度: {len(symbol)}")
+            raise ValueError("无效股票代码类型: 不能将Series对象作为股票代码传递")
         
-        # 检查DataFrame特征关键词
-        dataframe_indicators = ['DataFrame', 'Series', 'open', 'high', 'low', 'close', 'volume', 'date']
-        if any(indicator in symbol_str for indicator in dataframe_indicators):
-            logger.error(f"检测到DataFrame特征在股票代码中: {symbol_str[:200]}")
-            raise ValueError(f"无效股票代码: 检测到DataFrame特征")
+        # 转换为字符串并清理（处理非字符串输入）
+        try:
+            symbol_str = str(symbol).strip()
+        except Exception as e:
+            logger.critical(f"无法将股票代码转换为字符串，输入类型: {type(symbol)}，错误: {str(e)}")
+            raise ValueError(f"股票代码格式无效，无法转换为字符串: {str(e)}")
+        
+        # 检查字符串长度是否合理（正常股票代码不会超过20字符）
+        if len(symbol_str) > 20:
+            logger.critical(f"股票代码过长({len(symbol_str)}字符)，疑似无效输入: {symbol_str[:50]}...")
+            raise ValueError(f"股票代码过长（超过20字符），可能是误传的DataFrame/Series字符串表示")
+        
+        # 检查是否包含DataFrame相关特征关键词（不区分大小写，精准匹配）
+        dataframe_indicators = [
+            'DataFrame', 'Series', 'open', 'high', 'low', 'close', 'volume', 'date',
+            'timestamp', 'adj_close', 'amount', 'turnover', 'pe', 'pb'
+        ]
+        matched_indicators = [ind for ind in dataframe_indicators if ind.lower() in symbol_str.lower()]
+        if matched_indicators:
+            logger.critical(f"股票代码包含DataFrame特征关键词: {matched_indicators}，输入值: {symbol_str[:200]}")
+            raise ValueError(f"无效股票代码: 包含'{matched_indicators[0]}'等数据列名或Pandas对象关键词")
+        
+        # 检查是否为有效的股票代码格式（支持A股、港股、美股常见格式）
+        pattern = r'^([a-zA-Z]{2})?(\d{5,6}|\w{1,5})(\.[A-Za-z]{2})?$'
+        if not re.match(pattern, symbol_str):
+            logger.warning(
+                f"股票代码格式不标准: {symbol_str}\n"
+                f"建议格式：\n"
+                f"- A股: 000001 / sh000001 / 000001.SH\n"
+                f"- 港股: HK00700 / 00700.HK\n"
+                f"- 美股: AAPL / AAPL.US"
+            )
     
     def _acquire_and_validate_data(self, symbol: str, start_date: str, end_date: str, 
                                   timeframe: str) -> Dict[str, Any]:
@@ -193,625 +228,1039 @@ class BacktestEngine:
         :return: 包含成功状态和数据的结果字典
         """
         try:
-            # 🔧🔧🔧🔧🔧🔧 增强日志：记录日期参数
             logger.info(f"数据获取阶段 - 符号: {symbol}, 时间级别: {timeframe}")
             logger.info(f"请求日期范围: {start_date} 至 {end_date}")
             
+            # 简单日期格式验证（不依赖外部函数）
+            def parse_simple_date(date_str: str) -> datetime:
+                """简单日期解析（支持YYYYMMDD和YYYY-MM-DD）"""
+                date_str = str(date_str).strip()
+                try:
+                    if len(date_str) == 8 and date_str.isdigit():
+                        return datetime.strptime(date_str, '%Y%m%d')
+                    else:
+                        return datetime.strptime(date_str, '%Y-%m-%d')
+                except Exception:
+                    raise ValueError(f"日期格式错误: {date_str}，支持YYYYMMDD或YYYY-MM-DD")
+            
+            # 解析并验证日期范围
+            try:
+                start_dt = parse_simple_date(start_date)
+                end_dt = parse_simple_date(end_date)
+            except ValueError as e:
+                logger.error(f"日期解析失败: {str(e)}")
+                return {'success': False, 'error': str(e)}
+            
+            if start_dt >= end_dt:
+                logger.error(f"日期范围无效: 开始日期{start_date} >= 结束日期{end_date}")
+                return {'success': False, 'error': '开始日期不能大于等于结束日期'}
+            
+            # 限制最大回测周期
+            max_days = self.config.get('backtest', {}).get('max_period_days', 365*5)
+            if (end_dt - start_dt).days > max_days:
+                logger.warning(f"回测周期过长（{max_days}天限制），自动截断为最近{max_days}天")
+                start_dt = end_dt - timedelta(days=max_days)
+            
+            # 格式化为YYYY-MM-DD（适配数据源）
+            start_date_str = start_dt.strftime('%Y-%m-%d')
+            end_date_str = end_dt.strftime('%Y-%m-%d')
+            
             # 根据时间级别获取数据
             if timeframe == 'weekly':
-                df = self.data_api.get_weekly_data(symbol, start_date, end_date)
+                df = self.data_api.get_weekly_data(symbol, start_date_str, end_date_str)
             elif timeframe == 'daily':
-                df = self.data_api.get_daily_data(symbol, start_date, end_date)
+                df = self.data_api.get_daily_data(symbol, start_date_str, end_date_str)
             elif timeframe == 'minute':
-                df = self.data_api.get_minute_data(symbol, '5m', 30)
+                minute_days = self.config.get('data_fetcher', {}).get('minute_days', 30)
+                df = self.data_api.get_minute_data(symbol, '5m', minute_days)
             else:
-                return {'success': False, 'error': f'不支持的时间级别: {timeframe}'}
+                return {'success': False, 'error': f'不支持的时间级别: {timeframe}，支持weekly/daily/minute'}
             
             # 验证数据质量
             if df.empty:
-                logger.warning("获取的数据为空")
-                return {'success': False, 'error': '获取的数据为空'}
+                logger.warning(f"获取的数据为空 - 符号: {symbol}, 日期范围: {start_date_str}至{end_date_str}")
+                return {'success': False, 'error': '获取的数据为空，请检查股票代码或日期范围'}
             
             if len(df) < 10:
-                logger.warning(f"数据点数不足: {len(df)}条，至少需要10个数据点")
-                return {'success': False, 'error': '数据点数不足，至少需要10个数据点'}
+                logger.warning(f"数据点数不足: {len(df)}条（至少需要10个数据点）")
+                return {'success': False, 'error': f'数据点数不足，仅获取到{len(df)}条，至少需要10个数据点'}
             
             # 检查必要列
-            required_columns = ['open', 'high', 'low', 'close']
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                logger.warning(f"缺失必要列: {missing_columns}")
-                return {'success': False, 'error': f'缺失必要列: {missing_columns}'}
+                logger.warning(f"缺失必要数据列: {missing_columns}")
+                return {'success': False, 'error': f'缺失必要数据列: {missing_columns}，必须包含open/high/low/close/volume'}
             
-            # 🔧🔧🔧🔧🔧🔧 修复：优先使用数据源返回的日期信息
+            # 处理日期列
             if 'date' not in df.columns:
                 if 'timestamp' in df.columns:
-                    df = df.rename(columns={'timestamp': 'date'})
-                    logger.info("使用timestamp列作为日期列")
+                    df['date'] = pd.to_datetime(df['timestamp']).dt.date
+                    df = df.rename(columns={'timestamp': 'datetime'})
+                    logger.info("数据列转换：timestamp -> datetime，新增date列（日期）")
                 else:
-                    # 🔧 关键修复：不创建可能错误的日期范围，直接返回错误
-                    logger.error("数据缺少日期列，无法进行时间序列分析")
-                    return {'success': False, 'error': '数据缺少日期列，无法进行时间序列分析'}
+                    logger.error("数据中没有日期列（date）或时间戳列（timestamp）")
+                    return {'success': False, 'error': '数据中没有日期列或时间戳列，无法进行回测'}
             
-            # 🔧 安全处理日期列
-            try:
-                df['date'] = pd.to_datetime(df['date'])
-                df = df.sort_values('date').reset_index(drop=True)
-                
-                # 记录实际数据日期范围
-                actual_start = df['date'].min()
-                actual_end = df['date'].max()
-                days_range = (actual_end - actual_start).days
-                
-                logger.info(f"实际数据日期范围: {actual_start.strftime('%Y-%m-%d')} 至 {actual_end.strftime('%Y-%m-%d')}")
-                logger.info(f"数据点数: {len(df)}条, 时间跨度: {days_range}天")
-                
-                # 🔧 检查日期范围是否符合预期
-                expected_start = pd.to_datetime(start_date)
-                expected_end = pd.to_datetime(end_date)
-                
-                if actual_start > expected_start or actual_end < expected_end:
-                    logger.warning(f"数据日期范围不完整: 预期{expected_start.strftime('%Y-%m-%d')}~{expected_end.strftime('%Y-%m-%d')}, 实际{actual_start.strftime('%Y-%m-%d')}~{actual_end.strftime('%Y-%m-%d')}")
-                
-            except Exception as e:
-                logger.error(f"日期处理异常: {str(e)}")
-                return {'success': False, 'error': f'日期处理异常: {str(e)}'}
+            # 数据排序和去重
+            df = df.sort_values('date').drop_duplicates(subset=['date'], keep='last')
+            df = df.reset_index(drop=True)
             
+            logger.info(f"数据预处理完成: {len(df)}条有效记录")
             return {'success': True, 'data': df}
             
+        except DataFetchError as e:
+            logger.error(f"数据获取失败（数据源异常）: {str(e)}")
+            return {'success': False, 'error': f'数据源异常: {str(e)}'}
         except Exception as e:
-            logger.error(f"数据获取异常: {str(e)}")
-            return {'success': False, 'error': f'数据获取异常: {str(e)}'}
+            logger.error(f"数据获取过程异常: {str(e)}", exc_info=True)
+            return {'success': False, 'error': str(e)}
     
     def _perform_chanlun_calculation(self, df: pd.DataFrame, timeframe: str) -> Dict[str, Any]:
-        """
-        执行缠论计算 - 增强符号验证
-        :return: 包含成功状态和计算结果的结果字典
-        """
+        """执行缠论计算（包含分型、笔、线段、中枢识别）"""
         try:
-            # 🔧🔧🔧🔧🔧🔧 防御性检查：确保没有DataFrame被错误传递
-            if hasattr(df, 'symbol') and not isinstance(df.symbol, str):
-                logger.warning(f"检测到非字符串symbol: {type(df.symbol)}")
+            logger.info(f"开始缠论计算 - 时间级别: {timeframe}，数据量: {len(df)}条")
             
-            # 设置时间级别参数
-            self.calculator.set_timeframe_params(timeframe)
+            # 根据时间级别加载对应的缠论参数
+            chanlun_params = self.config.get('chanlun', {}).get(timeframe, {})
+            if not chanlun_params:
+                chanlun_params = self.config.get('chanlun', {}).get('default', {})
+                logger.warning(f"未配置{timeframe}级别缠论参数，使用默认参数: {chanlun_params}")
             
-            # 计算缠论指标
-            calculated_df = self.calculator.calculate(df, timeframe)
-            
-            # 验证计算结果
-            if calculated_df.empty:
-                return {'success': False, 'error': '缠论计算结果为空'}
-            
-            # 检查是否生成了必要的缠论列
-            chanlun_columns = ['top_fractal', 'bottom_fractal', 'pen_type', 'central_bank']
-            generated_columns = [col for col in chanlun_columns if col in calculated_df.columns]
-            if len(generated_columns) < 2:
-                logger.warning(f"生成的缠论指标较少: {generated_columns}")
-            
-            return {'success': True, 'data': calculated_df}
-            
-        except Exception as e:
-            return {'success': False, 'error': f'缠论计算异常: {str(e)}'}
-    
-    def _execute_backtest(self, df: pd.DataFrame, initial_capital: float, 
-                         timeframe: str) -> Dict[str, Any]:
-        """
-        执行回测
-        :return: 包含成功状态和回测结果的结果字典
-        """
-        try:
-            # 使用计算器的回测功能
-            result = self.calculator.backtest(df, initial_capital, timeframe)
-            
-            # 验证回测结果
-            if not result or 'final_value' not in result:
-                return {'success': False, 'error': '回测结果无效'}
-            
-            # 添加额外指标
-            result = self._enhance_backtest_metrics(result)
-            
-            return {'success': True, 'data': result}
-            
-        except Exception as e:
-            return {'success': False, 'error': f'回测执行异常: {str(e)}'}
-    
-    def _enhance_backtest_metrics(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        增强回测指标计算
-        """
-        # 计算年化波动率
-        if 'portfolio_values' in result and len(result['portfolio_values']) > 1:
-            returns = []
-            for i in range(1, len(result['portfolio_values'])):
-                ret = (result['portfolio_values'][i] - result['portfolio_values'][i-1]) / result['portfolio_values'][i-1]
-                returns.append(ret)
-            
-            if returns:
-                result['volatility'] = np.std(returns) * np.sqrt(252) * 100  # 年化波动率
-                result['max_return'] = max(returns) * 100 if returns else 0
-                result['min_return'] = min(returns) * 100 if returns else 0
-        
-        # 计算盈亏比
-        if 'trades' in result:
-            profitable_trades = [t for t in result['trades'] if t.get('profit', 0) > 0]
-            loss_trades = [t for t in result['trades'] if t.get('profit', 0) < 0]
-            
-            if loss_trades:
-                avg_profit = np.mean([t.get('profit', 0) for t in profitable_trades]) if profitable_trades else 0
-                avg_loss = abs(np.mean([t.get('profit', 0) for t in loss_trades])) if loss_trades else 0
-                result['profit_loss_ratio'] = avg_profit / avg_loss if avg_loss > 0 else float('inf')
-            else:
-                result['profit_loss_ratio'] = float('inf')
-        
-        # 计算交易频率
-        if 'data_points' in result and 'total_trades' in result:
-            result['trade_frequency'] = result['total_trades'] / result['data_points'] * 100 if result['data_points'] > 0 else 0
-        
-        return result
-    
-    def _generate_comprehensive_report(self, result: Dict[str, Any], symbol: str, 
-                                      timeframe: str) -> Dict[str, Any]:
-        """
-        生成全面报告
-        """
-        try:
-            report_data = {
-                'symbol': symbol,
-                'timeframe': timeframe,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'performance_metrics': self._extract_performance_metrics(result),
-                'trade_analysis': self._analyze_trades(result),
-                'risk_metrics': self._calculate_risk_metrics(result),
-                'summary': self._generate_summary(result, symbol, timeframe),
-                # 🔧🔧🔧🔧🔧🔧 新增：记录实际日期范围
-                'date_range_info': result.get('actual_date_range', {})
-            }
-            
-            # 保存报告
-            report_filename = f"backtest_report_{symbol}_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            os.makedirs("outputs/reports", exist_ok=True)
-            with open(f"outputs/reports/{report_filename}", 'w', encoding='utf-8') as f:
-                json.dump(report_data, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"报告已保存: outputs/reports/{report_filename}")
-            return report_data
-            
-        except Exception as e:
-            logger.error(f"生成报告失败: {e}")
-            return {'error': str(e)}
-    
-    def _extract_performance_metrics(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """提取性能指标"""
-        return {
-            'initial_capital': result.get('initial_capital', 0),
-            'final_value': result.get('final_value', 0),
-            'total_return': result.get('return_percent', 0),
-            'annual_return': result.get('annual_return', 0),
-            'sharpe_ratio': result.get('sharpe_ratio', 0),
-            'win_rate': result.get('win_rate', 0),
-            'total_trades': result.get('total_trades', 0),
-            'profitable_trades': result.get('profitable_trades', 0),
-            'max_drawdown': result.get('max_drawdown', 0),
-            'volatility': result.get('volatility', 0),
-            'profit_loss_ratio': result.get('profit_loss_ratio', 0),
-            'trade_frequency': result.get('trade_frequency', 0)
-        }
-    
-    def _analyze_trades(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """分析交易记录"""
-        trades = result.get('trades', [])
-        if not trades:
-            return {'total_trades': 0}
-        
-        buy_trades = [t for t in trades if t.get('action') == 'buy']
-        sell_trades = [t for t in trades if t.get('action') == 'sell']
-        
-        return {
-            'total_trades': len(trades),
-            'buy_trades': len(buy_trades),
-            'sell_trades': len(sell_trades),
-            'avg_profit': np.mean([t.get('profit', 0) for t in sell_trades]) if sell_trades else 0,
-            'avg_holding_period': self._calculate_avg_holding_period(trades),
-            'consecutive_wins': self._calculate_consecutive_wins(sell_trades),
-            'consecutive_losses': self._calculate_consecutive_losses(sell_trades)
-        }
-    
-    def _calculate_avg_holding_period(self, trades: List[Dict]) -> float:
-        """计算平均持仓周期"""
-        holding_periods = []
-        buy_dates = {}
-        
-        for trade in trades:
-            if trade['action'] == 'buy':
-                buy_dates[trade.get('symbol', 'default')] = trade.get('date')
-            elif trade['action'] == 'sell':
-                buy_date = buy_dates.get(trade.get('symbol', 'default'))
-                if buy_date and hasattr(buy_date, '__sub__'):
-                    holding_period = (trade.get('date') - buy_date).days
-                    holding_periods.append(holding_period)
-        
-        return np.mean(holding_periods) if holding_periods else 0
-    
-    def _calculate_consecutive_wins(self, sell_trades: List[Dict]) -> int:
-        """计算连续盈利次数"""
-        max_consecutive = 0
-        current_consecutive = 0
-        
-        for trade in sell_trades:
-            if trade.get('profit', 0) > 0:
-                current_consecutive += 1
-                max_consecutive = max(max_consecutive, current_consecutive)
-            else:
-                current_consecutive = 0
-        
-        return max_consecutive
-    
-    def _calculate_consecutive_losses(self, sell_trades: List[Dict]) -> int:
-        """计算连续亏损次数"""
-        max_consecutive = 0
-        current_consecutive = 0
-        
-        for trade in sell_trades:
-            if trade.get('profit', 0) < 0:
-                current_consecutive += 1
-                max_consecutive = max(max_consecutive, current_consecutive)
-            else:
-                current_consecutive = 0
-        
-        return max_consecutive
-    
-    def _calculate_risk_metrics(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """计算风险指标"""
-        portfolio_values = result.get('portfolio_values', [])
-        if len(portfolio_values) < 2:
-            return {}
-        
-        returns = []
-        for i in range(1, len(portfolio_values)):
-            ret = (portfolio_values[i] - portfolio_values[i-1]) / portfolio_values[i-1]
-            returns.append(ret)
-        
-        if not returns:
-            return {}
-        
-        return {
-            'var_95': np.percentile(returns, 5) * 100,  # 95% VaR
-            'cvar_95': np.mean([r for r in returns if r <= np.percentile(returns, 5)]) * 100 if returns else 0,
-            'downside_deviation': np.std([r for r in returns if r < 0]) * np.sqrt(252) * 100 if [r for r in returns if r < 0] else 0,
-            'ulcer_index': self._calculate_ulcer_index(portfolio_values),
-            'calmar_ratio': result.get('annual_return', 0) / result.get('max_drawdown', 1) if result.get('max_drawdown', 0) > 0 else 0
-        }
-    
-    def _calculate_ulcer_index(self, portfolio_values: List[float]) -> float:
-        """计算溃疡指数"""
-        if len(portfolio_values) < 2:
-            return 0
-        
-        peak = portfolio_values[0]
-        drawdowns_squared = []
-        
-        for value in portfolio_values:
-            if value > peak:
-                peak = value
-            drawdown = (peak - value) / peak
-            drawdowns_squared.append(drawdown ** 2)
-        
-        return np.sqrt(np.mean(drawdowns_squared)) * 100 if drawdowns_squared else 0
-    
-    def _generate_summary(self, result: Dict[str, Any], symbol: str, timeframe: str) -> Dict[str, Any]:
-        """生成总结"""
-        performance = result.get('return_percent', 0)
-        risk = result.get('max_drawdown', 0)
-        
-        if performance > 20 and risk < 10:
-            rating = '优秀'
-            recommendation = '策略表现优异，建议继续使用'
-        elif performance > 10 and risk < 15:
-            rating = '良好'
-            recommendation = '策略表现良好，可考虑优化'
-        elif performance > 0:
-            rating = '一般'
-            recommendation = '策略有待优化，建议调整参数'
-        else:
-            rating = '较差'
-            recommendation = '策略需要重大调整或放弃'
-        
-        return {
-            'rating': rating,
-            'recommendation': recommendation,
-            'strengths': self._identify_strengths(result),
-            'weaknesses': self._identify_weaknesses(result),
-            'improvement_suggestions': self._generate_improvement_suggestions(result)
-        }
-    
-    def _identify_strengths(self, result: Dict[str, Any]) -> List[str]:
-        """识别优势"""
-        strengths = []
-        
-        if result.get('win_rate', 0) > 60:
-            strengths.append('高胜率')
-        if result.get('profit_loss_ratio', 0) > 2:
-            strengths.append('良好的盈亏比')
-        if result.get('max_drawdown', 0) < 10:
-            strengths.append('低回撤')
-        if result.get('sharpe_ratio', 0) > 1:
-            strengths.append('优异的夏普比率')
-        if result.get('annual_return', 0) > 15:
-            strengths.append('高年化收益')
-        
-        return strengths if strengths else ['需进一步优化']
-    
-    def _identify_weaknesses(self, result: Dict[str, Any]) -> List[str]:
-        """识别劣势"""
-        weaknesses = []
-        
-        if result.get('win_rate', 0) < 40:
-            weaknesses.append('胜率偏低')
-        if result.get('profit_loss_ratio', 0) < 1:
-            weaknesses.append('盈亏比不理想')
-        if result.get('max_drawdown', 0) > 20:
-            weaknesses.append('回撤较大')
-        if result.get('sharpe_ratio', 0) < 0.5:
-            weaknesses.append('风险调整后收益不佳')
-        if result.get('annual_return', 0) < 5:
-            weaknesses.append('收益水平较低')
-        
-        return weaknesses if weaknesses else ['无明显劣势']
-    
-    def _generate_improvement_suggestions(self, result: Dict[str, Any]) -> List[str]:
-        """生成改进建议"""
-        suggestions = []
-        
-        if result.get('win_rate', 0) < 50:
-            suggestions.append('优化入场时机，提高信号质量')
-        if result.get('profit_loss_ratio', 0) < 1.5:
-            suggestions.append('调整止损止盈策略，改善风险收益比')
-        if result.get('max_drawdown', 0) > 15:
-            suggestions.append('加强风险控制，降低单次交易仓位')
-        if result.get('trade_frequency', 0) > 30:
-            suggestions.append('减少交易频率，降低交易成本')
-        if result.get('volatility', 0) > 20:
-            suggestions.append('考虑增加过滤条件，降低组合波动')
-        
-        return suggestions if suggestions else ['当前策略参数较为合理']
-    
-    def _generate_detailed_charts(self, result: Dict[str, Any], symbol: str, 
-                                 timeframe: str) -> Dict[str, Any]:
-        """
-        生成详细图表
-        """
-        try:
-            chart_files = []
-            
-            # 1. 组合价值曲线
-            if 'portfolio_values' in result:
-                fig1 = plt.figure(figsize=(12, 8))
-                plt.plot(result['portfolio_values'])
-                plt.title(f'{symbol} {timeframe}回测 - 组合价值曲线')
-                plt.xlabel('时间')
-                plt.ylabel('组合价值')
-                chart1_file = f"portfolio_growth_{symbol}_{timeframe}.png"
-                plt.savefig(f"outputs/plots/{chart1_file}", dpi=300, bbox_inches='tight')
-                chart_files.append(chart1_file)
-                plt.close(fig1)
-            
-            # 2. 回撤曲线
-            if 'portfolio_values' in result:
-                fig2 = plt.figure(figsize=(12, 8))
-                portfolio_values = result['portfolio_values']
-                peak = portfolio_values[0]
-                drawdowns = []
-                for value in portfolio_values:
-                    if value > peak:
-                        peak = value
-                    drawdown = (peak - value) / peak * 100
-                    drawdowns.append(drawdown)
-                
-                plt.plot(drawdowns)
-                plt.title(f'{symbol} {timeframe}回测 - 回撤曲线')
-                plt.xlabel('时间')
-                plt.ylabel('回撤百分比 (%)')
-                chart2_file = f"drawdown_{symbol}_{timeframe}.png"
-                plt.savefig(f"outputs/plots/{chart2_file}", dpi=300, bbox_inches='tight')
-                chart_files.append(chart2_file)
-                plt.close(fig2)
-            
-            logger.info(f"生成{len(chart_files)}张图表")
-            return {'chart_files': chart_files, 'success': True}
-            
-        except Exception as e:
-            logger.error(f"生成图表失败: {e}")
-            return {'error': str(e), 'success': False}
-    
-    def _send_notifications(self, result: Dict[str, Any], symbol: str, timeframe: str):
-        """发送通知"""
-        try:
-            # 生成通知内容
-            performance = result.get('return_percent', 0)
-            drawdown = result.get('max_drawdown', 0)
-            win_rate = result.get('win_rate', 0)
-            
-            # 🔧🔧🔧🔧🔧🔧 包含实际日期范围信息
-            actual_range = result.get('actual_date_range', {})
-            actual_start = actual_range.get('start', '未知')
-            actual_end = actual_range.get('end', '未知')
-            
-            message = (
-                f"回测完成通知\n"
-                f"标的: {symbol} ({timeframe})\n"
-                f"实际日期范围: {actual_start} 至 {actual_end}\n"
-                f"总回报: {performance:.2f}%\n"
-                f"最大回撤: {drawdown:.2f}%\n"
-                f"胜率: {win_rate:.2f}%\n"
-                f"交易次数: {result.get('total_trades', 0)}\n"
-                f"完成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            # 执行缠论计算
+            result_df = self.calculator.calculate(
+                df,
+                timeframe=timeframe,
+                fractal_sensitivity=chanlun_params.get('fractal_sensitivity', 3),
+                pen_min_length=chanlun_params.get('pen_min_length', 5),
+                segment_min_length=chanlun_params.get('segment_min_length', 3),
+                central_bank_min_length=chanlun_params.get('central_bank_min_length', 5)
             )
             
-            # 发送钉钉通知
-            self.notifier.send_signal(symbol, {
-                'action': 'report',
-                'message': message,
-                'performance': performance,
-                'risk_level': 'low' if drawdown < 10 else 'medium' if drawdown < 20 else 'high'
-            })
+            # 验证计算结果
+            required_calc_columns = ['top_fractal', 'bottom_fractal', 'pen_type', 'segment_type', 'central_bank']
+            missing_calc_cols = [col for col in required_calc_columns if col not in result_df.columns]
+            if missing_calc_cols:
+                logger.warning(f"缠论计算缺失部分列: {missing_calc_cols}")
             
-            logger.info("回测完成通知已发送")
-            
+            logger.info("缠论计算完成")
+            return {'success': True, 'data': result_df}
         except Exception as e:
-            logger.error(f"发送通知失败: {e}")
+            logger.error(f"缠论计算失败: {str(e)}", exc_info=True)
+            return {'success': False, 'error': str(e)}
+    
+    def _execute_backtest(self, df: pd.DataFrame, initial_capital: float, timeframe: str) -> Dict[str, Any]:
+        """执行回测逻辑（基于缠论信号的交易策略）"""
+        try:
+            logger.info(f"开始回测执行 - 初始资金: {initial_capital:.2f}，时间级别: {timeframe}")
+            
+            # 初始化回测参数（全部使用get方法，避免KeyError）
+            backtest_config = self.config.get('backtest', {})
+            backtest_params = {
+                'initial_capital': initial_capital,
+                'slippage': backtest_config.get('slippage', 0.001),  # 滑点率 0.1%
+                'transaction_cost': backtest_config.get('transaction_cost', 0.0003),  # 交易成本 0.03%
+                'max_position': backtest_config.get('max_single_position', 0.5),  # 单只股票最大仓位 50%
+                'stop_loss_ratio': backtest_config.get('stop_loss_ratio', 0.05),  # 止损比例 5%
+                'take_profit_ratio': backtest_config.get('take_profit_ratio', 0.1),  # 止盈比例 10%
+                'signal_type': backtest_config.get('signal_type', 'pen_segment_central_bank'),
+                'min_holding_period': backtest_config.get('min_holding_period', 1)
+            }
+            
+            # 调用计算器的回测方法
+            result = self.calculator.backtest(df, backtest_params, timeframe)
+            
+            # 验证回测结果完整性
+            required_result_fields = [
+                'equity_curve', 'drawdown', 'return_percent', 'max_drawdown',
+                'sharpe_ratio', 'win_rate', 'total_trades', 'profit_factor',
+                'volatility', 'downside_risk', 'sortino_ratio', 'calmar_ratio',
+                'avg_holding_period', 'max_holding_period', 'monthly_trades',
+                'trades', 'price_data'
+            ]
+            missing_fields = [field for field in required_result_fields if field not in result]
+            if missing_fields:
+                logger.warning(f"回测结果缺失部分字段: {missing_fields}")
+                # 补充缺失字段的默认值
+                for field in missing_fields:
+                    if field == 'equity_curve':
+                        result[field] = pd.Series([initial_capital] * len(df), index=df.index)
+                    elif field == 'drawdown':
+                        result[field] = pd.Series([0.0] * len(df), index=df.index)
+                    elif field.endswith('_percent'):
+                        result[field] = 0.0
+                    elif field.endswith('_ratio'):
+                        result[field] = 0.0
+                    elif field.endswith('_trades'):
+                        result[field] = 0
+                    elif field in ['trades', 'price_data']:
+                        result[field] = pd.DataFrame() if field != 'trades' else []
+            
+            logger.info(
+                f"回测执行完成 - 总交易次数: {result.get('total_trades', 0)}, "
+                f"总回报: {result.get('return_percent', 0):.2f}%, "
+                f"最大回撤: {result.get('max_drawdown', 0):.2f}%"
+            )
+            return {'success': True, 'data': result}
+        except Exception as e:
+            logger.error(f"回测执行失败: {str(e)}", exc_info=True)
+            return {'success': False, 'error': str(e)}
+    
+    def _generate_comprehensive_report(self, result: Dict[str, Any], symbol: str, timeframe: str) -> Dict[str, Any]:
+        """生成综合回测报告（包含性能、风险、交易活动分析）"""
+        try:
+            logger.info(f"生成综合回测报告 - 股票: {symbol}, 时间级别: {timeframe}")
+            
+            # 提取核心指标
+            performance = {
+                'return_percent': round(result.get('return_percent', 0), 2),
+                'max_drawdown': round(result.get('max_drawdown', 0), 2),
+                'sharpe_ratio': round(result.get('sharpe_ratio', 0), 2),
+                'win_rate': round(result.get('win_rate', 0) * 100, 2),
+                'total_trades': result.get('total_trades', 0),
+                'profit_factor': round(result.get('profit_factor', 0), 2),
+                'expectancy': round(result.get('expectancy', 0), 2),
+                'avg_profit_per_trade': round(result.get('avg_profit_per_trade', 0), 2),
+                'avg_loss_per_trade': round(result.get('avg_loss_per_trade', 0), 2)
+            }
+            
+            risk_metrics = {
+                'volatility': round(result.get('volatility', 0) * 100, 2),
+                'downside_risk': round(result.get('downside_risk', 0) * 100, 2),
+                'sortino_ratio': round(result.get('sortino_ratio', 0), 2),
+                'calmar_ratio': round(result.get('calmar_ratio', 0), 2),
+                'value_at_risk': round(result.get('value_at_risk', 0), 2),
+                'conditional_value_at_risk': round(result.get('conditional_value_at_risk', 0), 2)
+            }
+            
+            trading_activity = {
+                'avg_holding_period': round(result.get('avg_holding_period', 0), 1),
+                'max_holding_period': result.get('max_holding_period', 0),
+                'min_holding_period': result.get('min_holding_period', 0),
+                'monthly_trades': result.get('monthly_trades', {}),
+                'win_streak': result.get('win_streak', 0),
+                'lose_streak': result.get('lose_streak', 0),
+                'long_trades_count': result.get('long_trades_count', 0),
+                'short_trades_count': result.get('short_trades_count', 0)
+            }
+            
+            # 生成报告主体
+            report = {
+                'metadata': {
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'start_date': result['actual_date_range'].get('start', 'N/A'),
+                    'end_date': result['actual_date_range'].get('end', 'N/A'),
+                    'initial_capital': result.get('initial_capital', 100000),
+                    'final_capital': round(result.get('final_value', result.get('initial_capital', 100000)), 2),
+                    'backtest_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                },
+                'performance': performance,
+                'risk_metrics': risk_metrics,
+                'trading_activity': trading_activity,
+                'strategy_params': self.config.get('backtest', {}),
+                'chanlun_params': self.config.get('chanlun', {}).get(timeframe, self.config.get('chanlun', {}).get('default', {})),
+                'summary': self._generate_report_summary(performance, risk_metrics)
+            }
+            
+            # 导出报告（如果启用）
+            exporter_config = self.config.get('exporter', {})
+            if exporter_config.get('enabled', False):
+                export_formats = exporter_config.get('formats', ['json', 'csv'])
+                export_path = self.exporter.export_report(
+                    report, 
+                    symbol=symbol, 
+                    timeframe=timeframe,
+                    formats=export_formats,
+                    output_dir=exporter_config.get('output_dir', 'outputs/reports')
+                )
+                report['export_info'] = {
+                    'path': export_path,
+                    'formats': export_formats
+                }
+                logger.info(f"回测报告已导出至: {export_path}")
+            
+            logger.info("综合回测报告生成完成")
+            return report
+        except Exception as e:
+            logger.error(f"报告生成失败: {str(e)}", exc_info=True)
+            return {'error': str(e), 'partial_report': {}}
+    
+    def _generate_report_summary(self, performance: Dict[str, Any], risk_metrics: Dict[str, Any]) -> str:
+        """生成报告摘要（自然语言描述）"""
+        try:
+            return_percent = performance['return_percent']
+            max_drawdown = performance['max_drawdown']
+            win_rate = performance['win_rate']
+            total_trades = performance['total_trades']
+            sharpe_ratio = performance['sharpe_ratio']
+            
+            summary_parts = []
+            
+            # 收益总结
+            if return_percent > 50:
+                summary_parts.append(f"总回报率{return_percent}%，表现优秀")
+            elif return_percent > 10:
+                summary_parts.append(f"总回报率{return_percent}%，表现良好")
+            elif return_percent > 0:
+                summary_parts.append(f"总回报率{return_percent}%，表现一般")
+            else:
+                summary_parts.append(f"总回报率{return_percent}%，表现不佳")
+            
+            # 风险总结
+            if max_drawdown < 10:
+                summary_parts.append(f"最大回撤{max_drawdown}%，风险控制优秀")
+            elif max_drawdown < 20:
+                summary_parts.append(f"最大回撤{max_drawdown}%，风险控制良好")
+            else:
+                summary_parts.append(f"最大回撤{max_drawdown}%，风险较高")
+            
+            # 交易频率总结
+            if total_trades == 0:
+                summary_parts.append("未产生任何交易")
+            elif total_trades < 10:
+                summary_parts.append(f"共执行{total_trades}笔交易，交易频率较低")
+            elif total_trades < 50:
+                summary_parts.append(f"共执行{total_trades}笔交易，交易频率适中")
+            else:
+                summary_parts.append(f"共执行{total_trades}笔交易，交易频率较高")
+            
+            # 胜率总结
+            if win_rate > 60:
+                summary_parts.append(f"胜率{win_rate}%，策略准确性较高")
+            elif win_rate > 50:
+                summary_parts.append(f"胜率{win_rate}%，策略准确性良好")
+            else:
+                summary_parts.append(f"胜率{win_rate}%，策略准确性一般")
+            
+            # 夏普比率总结
+            if sharpe_ratio > 2:
+                summary_parts.append(f"夏普比率{sharpe_ratio}，风险调整后收益优秀")
+            elif sharpe_ratio > 1:
+                summary_parts.append(f"夏普比率{sharpe_ratio}，风险调整后收益良好")
+            else:
+                summary_parts.append(f"夏普比率{sharpe_ratio}，风险调整后收益一般")
+            
+            return "，".join(summary_parts) + "。"
+        except Exception as e:
+            logger.error(f"生成报告摘要失败: {str(e)}")
+            return "报告摘要生成失败，详细数据请查看完整报告。"
+    
+    def _generate_detailed_charts(self, result: Dict[str, Any], symbol: str, timeframe: str) -> Dict[str, Any]:
+        """生成详细的回测图表（资金曲线、最大回撤、交易信号、缠论结构）"""
+        try:
+            logger.info(f"生成回测图表 - 股票: {symbol}, 时间级别: {timeframe}")
+            
+            # 创建图表保存目录
+            chart_config = self.config.get('plotter', {})
+            base_chart_dir = chart_config.get('output_dir', 'outputs/charts')
+            chart_dir = os.path.join(base_chart_dir, timeframe, symbol)
+            os.makedirs(chart_dir, exist_ok=True)
+            
+            # 1. 资金曲线图表
+            equity_curve_path = self.plotter.plot_equity_curve(
+                equity_curve=result['equity_curve'],
+                benchmark_curve=result.get('benchmark_curve'),
+                save_path=os.path.join(chart_dir, f'{symbol}_equity_curve.png'),
+                title=f'{symbol} {timeframe} 资金曲线',
+                xlabel='日期',
+                ylabel='资产价值（元）'
+            )
+            
+            # 2. 最大回撤图表
+            drawdown_path = self.plotter.plot_drawdown(
+                drawdown=result['drawdown'],
+                save_path=os.path.join(chart_dir, f'{symbol}_drawdown.png'),
+                title=f'{symbol} {timeframe} 最大回撤',
+                xlabel='日期',
+                ylabel='回撤比例（%）'
+            )
+            
+            # 3. 交易信号图表（价格+信号+仓位）
+            signals_path = self.plotter.plot_signals(
+                price_data=result['price_data'],
+                trades=result['trades'],
+                positions=result.get('positions'),
+                save_path=os.path.join(chart_dir, f'{symbol}_trading_signals.png'),
+                title=f'{symbol} {timeframe} 交易信号',
+                xlabel='日期',
+                ylabel='价格（元）'
+            )
+            
+            # 4. 缠论结构图表（K线+分型+笔+线段+中枢）
+            chanlun_path = self.plotter.plot_chanlun_structure(
+                price_data=result['price_data'],
+                save_path=os.path.join(chart_dir, f'{symbol}_chanlun_structure.png'),
+                title=f'{symbol} {timeframe} 缠论结构',
+                xlabel='日期',
+                ylabel='价格（元）'
+            )
+            
+            # 5. 性能指标雷达图
+            radar_path = self.plotter.plot_performance_radar(
+                performance=result['report']['performance'],
+                risk_metrics=result['report']['risk_metrics'],
+                save_path=os.path.join(chart_dir, f'{symbol}_performance_radar.png'),
+                title=f'{symbol} {timeframe} 性能雷达图'
+            )
+            
+            logger.info(f"回测图表生成完成，保存目录: {chart_dir}")
+            return {
+                'success': True,
+                'chart_dir': chart_dir,
+                'equity_curve_path': equity_curve_path,
+                'drawdown_path': drawdown_path,
+                'signals_path': signals_path,
+                'chanlun_structure_path': chanlun_path,
+                'performance_radar_path': radar_path
+            }
+        except Exception as e:
+            logger.error(f"图表生成失败: {str(e)}", exc_info=True)
+            return {'success': False, 'error': str(e), 'chart_dir': None}
+    
+    def _send_notifications(self, result: Dict[str, Any], symbol: str, timeframe: str) -> None:
+        """发送回测结果通知（钉钉）"""
+        try:
+            logger.info(f"发送回测结果通知 - 股票: {symbol}")
+            
+            # 提取核心信息
+            return_percent = result.get('return_percent', 0)
+            max_drawdown = result.get('max_drawdown', 0)
+            total_trades = result.get('total_trades', 0)
+            win_rate = result.get('win_rate', 0) * 100
+            actual_date_range = result.get('actual_date_range', {})
+            summary = result['report'].get('summary', '')
+            
+            # 构建通知内容
+            content = (
+                f"📊 缠论回测结果通知\n"
+                f"=======================\n"
+                f"股票代码: {symbol}\n"
+                f"时间级别: {timeframe}\n"
+                f"日期范围: {actual_date_range.get('start', 'N/A')} 至 {actual_date_range.get('end', 'N/A')}\n"
+                f"初始资金: {result.get('initial_capital', 100000):,.2f}元\n"
+                f"最终资金: {result.get('final_value', result.get('initial_capital', 100000)):,.2f}元\n"
+                f"总回报率: {return_percent:.2f}%\n"
+                f"最大回撤: {max_drawdown:.2f}%\n"
+                f"交易次数: {total_trades}次\n"
+                f"胜率: {win_rate:.2f}%\n"
+                f"夏普比率: {result.get('sharpe_ratio', 0):.2f}\n"
+                f"=======================\n"
+                f"📝 总结: {summary}\n"
+                f"📁 详细报告: {result['report'].get('export_info', {}).get('path', '未导出')}"
+            )
+            
+            # 发送文本通知
+            self.notifier.send_text(content)
+            
+            # 发送图表（如果生成成功）
+            if result.get('charts', {}).get('success', False):
+                chart_paths = [
+                    result['charts']['equity_curve_path'],
+                    result['charts']['signals_path'],
+                    result['charts']['chanlun_structure_path']
+                ]
+                # 过滤不存在的图表路径
+                valid_chart_paths = [path for path in chart_paths if path and os.path.exists(path)]
+                if valid_chart_paths:
+                    self.notifier.send_images(valid_chart_paths)
+                    logger.info(f"已发送{len(valid_chart_paths)}张图表到钉钉")
+            
+            logger.info("回测结果通知发送完成")
+        except Exception as e:
+            logger.error(f"通知发送失败: {str(e)}", exc_info=True)
     
     def _create_error_result(self, initial_capital: float, error_msg: str) -> Dict[str, Any]:
-        """创建错误结果"""
+        """创建错误结果对象（统一错误返回格式）"""
         return {
             'success': False,
             'error': error_msg,
             'initial_capital': initial_capital,
             'final_value': initial_capital,
             'return_percent': 0.0,
-            'annual_return': 0.0,
             'max_drawdown': 0.0,
             'sharpe_ratio': 0.0,
             'win_rate': 0.0,
             'total_trades': 0,
-            'profitable_trades': 0,
+            'profit_factor': 0.0,
+            'volatility': 0.0,
+            'downside_risk': 0.0,
+            'sortino_ratio': 0.0,
+            'calmar_ratio': 0.0,
+            'avg_holding_period': 0.0,
+            'max_holding_period': 0,
+            'monthly_trades': {},
             'trades': [],
-            'portfolio_values': [initial_capital],
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'price_data': pd.DataFrame(),
+            'equity_curve': pd.Series(),
+            'drawdown': pd.Series(),
+            'actual_date_range': {},
+            'report': {'error': error_msg, 'partial_report': {}},
+            'charts': {'success': False, 'error': error_msg}
         }
+    
+    def batch_backtest(self, symbols: List[str], start_date: str, end_date: str, 
+                      timeframe: str = 'weekly', initial_capital: float = 100000) -> Dict[str, Any]:
+        """批量回测多个股票"""
+        logger.info(f"开始批量回测 - 标的数量: {len(symbols)}, 时间级别: {timeframe}, 初始资金: {initial_capital:.2f}元")
+        
+        # 初始化批量回测结果
+        batch_results = {
+            'metadata': {
+                'batch_id': datetime.now().strftime('%Y%m%d%H%M%S'),
+                'start_date': start_date,
+                'end_date': end_date,
+                'timeframe': timeframe,
+                'initial_capital_per_symbol': initial_capital,
+                'total_symbols': len(symbols),
+                'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'end_time': None
+            },
+            'success_count': 0,
+            'fail_count': 0,
+            'results': {},
+            'summary': {
+                'avg_return': 0.0,
+                'median_return': 0.0,
+                'max_return': -float('inf'),
+                'min_return': float('inf'),
+                'best_symbol': None,
+                'worst_symbol': None,
+                'avg_max_drawdown': 0.0,
+                'avg_win_rate': 0.0,
+                'avg_trades_count': 0.0,
+                'profitable_symbols_count': 0,
+                'profitable_ratio': 0.0
+            }
+        }
+        
+        # 逐个执行回测
+        for i, symbol in enumerate(symbols, 1):
+            logger.info(f"\n===== 批量回测进度: {i}/{len(symbols)} - 股票: {symbol} =====")
+            try:
+                # 执行单只股票回测
+                single_result = self.run_comprehensive_backtest(
+                    symbol=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    timeframe=timeframe,
+                    initial_capital=initial_capital
+                )
+                
+                batch_results['results'][symbol] = single_result
+                
+                # 统计成功/失败
+                if single_result.get('success', False):
+                    batch_results['success_count'] += 1
+                    
+                    # 提取关键指标用于汇总
+                    return_percent = single_result.get('return_percent', 0)
+                    max_drawdown = single_result.get('max_drawdown', 0)
+                    win_rate = single_result.get('win_rate', 0)
+                    total_trades = single_result.get('total_trades', 0)
+                    
+                    # 更新汇总统计
+                    batch_results['summary']['avg_return'] += return_percent
+                    batch_results['summary']['avg_max_drawdown'] += max_drawdown
+                    batch_results['summary']['avg_win_rate'] += win_rate
+                    batch_results['summary']['avg_trades_count'] += total_trades
+                    
+                    # 更新最值
+                    if return_percent > batch_results['summary']['max_return']:
+                        batch_results['summary']['max_return'] = return_percent
+                        batch_results['summary']['best_symbol'] = symbol
+                    if return_percent < batch_results['summary']['min_return']:
+                        batch_results['summary']['min_return'] = return_percent
+                        batch_results['summary']['worst_symbol'] = symbol
+                    # 统计盈利标的
+                    if return_percent > 0:
+                        batch_results['summary']['profitable_symbols_count'] += 1
+                else:
+                    batch_results['fail_count'] += 1
+                    logger.error(f"批量回测 {symbol} 失败: {single_result.get('error', '未知错误')}")
+            
+            except Exception as e:
+                logger.error(f"批量回测 {symbol} 异常: {str(e)}", exc_info=True)
+                batch_results['results'][symbol] = {
+                    'success': False,
+                    'error': str(e),
+                    'initial_capital': initial_capital,
+                    'final_value': initial_capital
+                }
+                batch_results['fail_count'] += 1
+        
+        # 计算平均指标
+        total_success = batch_results['success_count']
+        if total_success > 0:
+            batch_results['summary']['avg_return'] /= total_success
+            batch_results['summary']['avg_max_drawdown'] /= total_success
+            batch_results['summary']['avg_win_rate'] /= total_success
+            batch_results['summary']['avg_trades_count'] /= total_success
+            batch_results['summary']['profitable_ratio'] = (batch_results['summary']['profitable_symbols_count'] / total_success) * 100
+        
+        # 计算中位数回报
+        return_list = [
+            res.get('return_percent', 0) 
+            for res in batch_results['results'].values() 
+            if res.get('success', False)
+        ]
+        if return_list:
+            batch_results['summary']['median_return'] = np.median(return_list)
+        else:
+            batch_results['summary']['median_return'] = 0.0
+        
+        # 补充结束时间
+        batch_results['metadata']['end_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 保存批量回测结果
+        batch_report_dir = self.config.get('exporter', {}).get('batch_report_dir', 'outputs/reports/batch')
+        os.makedirs(batch_report_dir, exist_ok=True)
+        batch_report_path = os.path.join(
+            batch_report_dir,
+            f'batch_backtest_{timeframe}_{batch_results["metadata"]["batch_id"]}.json'
+        )
+        with open(batch_report_path, 'w', encoding='utf-8') as f:
+            json.dump(batch_results, f, ensure_ascii=False, indent=2)
+        batch_results['report_path'] = batch_report_path
+        
+        # 发送批量回测摘要通知
+        if self.config.get('notifications', {}).get('enabled', False):
+            self._send_batch_backtest_notification(batch_results)
+        
+        logger.info(
+            f"\n===== 批量回测完成 =====\n"
+            f"总标的数: {len(symbols)}\n"
+            f"成功: {batch_results['success_count']}个\n"
+            f"失败: {batch_results['fail_count']}个\n"
+            f"平均回报率: {batch_results['summary']['avg_return']:.2f}%\n"
+            f"最高回报率: {batch_results['summary']['max_return']:.2f}% ({batch_results['summary']['best_symbol']})\n"
+            f"最低回报率: {batch_results['summary']['min_return']:.2f}% ({batch_results['summary']['worst_symbol']})\n"
+            f"盈利标的比例: {batch_results['summary']['profitable_ratio']:.2f}%\n"
+            f"报告保存路径: {batch_report_path}"
+        )
+        
+        return batch_results
+    
+    def _send_batch_backtest_notification(self, batch_results: Dict[str, Any]) -> None:
+        """发送批量回测摘要通知"""
+        try:
+            summary = batch_results['summary']
+            metadata = batch_results['metadata']
+            
+            content = (
+                f"📊 批量缠论回测完成通知\n"
+                f"=======================\n"
+                f"批量ID: {metadata['batch_id']}\n"
+                f"标的数量: {metadata['total_symbols']}个\n"
+                f"时间级别: {metadata['timeframe']}\n"
+                f"日期范围: {metadata['start_date']} 至 {metadata['end_date']}\n"
+                f"执行时间: {metadata['start_time']} - {metadata['end_time']}\n"
+                f"=======================\n"
+                f"✅ 成功: {batch_results['success_count']}个\n"
+                f"❌ 失败: {batch_results['fail_count']}个\n"
+                f"📈 平均回报率: {summary['avg_return']:.2f}%\n"
+                f"📊 中位数回报率: {summary['median_return']:.2f}%\n"
+                f"🏆 最佳标的: {summary['best_symbol']} ({summary['max_return']:.2f}%)\n"
+                f"⚠️  最差标的: {summary['worst_symbol']} ({summary['min_return']:.2f}%)\n"
+                f"💰 盈利标的比例: {summary['profitable_ratio']:.2f}%\n"
+                f"📊 平均胜率: {summary['avg_win_rate']*100:.2f}%\n"
+                f"=======================\n"
+                f"📁 详细报告: {batch_results['report_path']}"
+            )
+            
+            self.notifier.send_text(content)
+            logger.info("批量回测摘要通知发送完成")
+        except Exception as e:
+            logger.error(f"批量回测通知发送失败: {str(e)}", exc_info=True)
+    
+    def optimize_parameters(self, symbol: str, start_date: str, end_date: str, 
+                           param_ranges: Dict[str, List[Any]], timeframe: str = 'daily') -> Dict[str, Any]:
+        """参数优化（网格搜索）"""
+        logger.info(f"开始参数优化 - 股票: {symbol}, 时间级别: {timeframe}")
+        logger.info(f"参数搜索空间: {param_ranges}")
+        
+        from itertools import product
+        import time
+        
+        # 验证股票代码
+        self._validate_symbol_not_dataframe(symbol)
+        
+        # 获取并验证数据（避免重复获取）
+        data_result = self._acquire_and_validate_data(symbol, start_date, end_date, timeframe)
+        if not data_result['success']:
+            error_msg = f"参数优化失败: 数据获取失败 - {data_result['error']}"
+            logger.error(error_msg)
+            return {'success': False, 'error': error_msg}
+        
+        df = data_result['data']
+        logger.info(f"参数优化数据准备完成: {len(df)}条记录")
+        
+        # 执行缠论计算（基础计算，参数优化时仅调整策略参数）
+        calculation_result = self._perform_chanlun_calculation(df, timeframe)
+        if not calculation_result['success']:
+            error_msg = f"参数优化失败: 缠论计算失败 - {calculation_result['error']}"
+            logger.error(error_msg)
+            return {'success': False, 'error': error_msg}
+        
+        calculated_df = calculation_result['data']
+        
+        # 生成参数组合（网格搜索）
+        param_names = list(param_ranges.keys())
+        param_combinations = product(*param_ranges.values())
+        total_combinations = np.prod([len(range_list) for range_list in param_ranges.values()])
+        logger.info(f"参数组合总数: {total_combinations}个")
+        
+        # 初始化优化结果
+        best_result = None
+        best_params = None
+        best_score = -float('inf')
+        optimization_results = []
+        score_metric = self.config.get('optimization', {}).get('score_metric', 'sharpe_ratio')
+        
+        # 遍历所有参数组合
+        for i, params in enumerate(param_combinations, 1):
+            param_dict = dict(zip(param_names, params))
+            logger.info(f"测试参数组合 {i}/{total_combinations}: {param_dict}")
+            
+            try:
+                start_time = time.time()
+                
+                # 临时修改回测参数
+                backtest_config = self.config.get('backtest', {}).copy()
+                backtest_config.update(param_dict)
+                
+                # 执行回测
+                backtest_result = self._execute_backtest(
+                    calculated_df,
+                    initial_capital=self.config.get('optimization', {}).get('initial_capital', 100000),
+                    timeframe=timeframe
+                )
+                
+                if not backtest_result['success']:
+                    logger.warning(f"参数组合 {param_dict} 回测失败: {backtest_result['error']}")
+                    continue
+                
+                result = backtest_result['data']
+                result['parameters'] = param_dict
+                result['test_duration'] = round(time.time() - start_time, 2)
+                
+                # 计算评分（根据目标指标）
+                if score_metric == 'sharpe_ratio':
+                    score = result.get('sharpe_ratio', 0)
+                elif score_metric == 'return_percent':
+                    score = result.get('return_percent', 0) / max(result.get('max_drawdown', 1), 0.01)
+                elif score_metric == 'profit_factor':
+                    score = result.get('profit_factor', 0)
+                elif score_metric == 'win_rate':
+                    score = result.get('win_rate', 0)
+                else:
+                    score = result.get('sharpe_ratio', 0)
+                
+                result['score'] = score
+                optimization_results.append(result)
+                
+                # 更新最佳结果
+                if score > best_score:
+                    best_score = score
+                    best_result = result
+                    best_params = param_dict
+                    logger.info(f"更新最佳参数: {best_params}, 最佳评分: {best_score:.2f}")
+            
+            except Exception as e:
+                logger.error(f"参数组合 {param_dict} 测试失败: {str(e)}", exc_info=True)
+                continue
+        
+        # 验证优化结果
+        if best_result is None:
+            error_msg = "所有参数组合测试失败，未找到有效参数"
+            logger.error(error_msg)
+            return {'success': False, 'error': error_msg}
+        
+        # 保存优化结果
+        opt_config = self.config.get('optimization', {})
+        opt_output_dir = opt_config.get('output_dir', 'outputs/optimization')
+        os.makedirs(opt_output_dir, exist_ok=True)
+        
+        opt_result_path = os.path.join(
+            opt_output_dir,
+            f'{symbol}_{timeframe}_param_optimization_{datetime.now().strftime("%Y%m%d%H%M%S")}.json'
+        )
+        
+        with open(opt_result_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'metadata': {
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'score_metric': score_metric,
+                    'total_combinations': total_combinations,
+                    'success_combinations': len(optimization_results),
+                    'optimization_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                },
+                'best_parameters': best_params,
+                'best_result': best_result,
+                'all_results': optimization_results,
+                'param_ranges': param_ranges
+            }, f, ensure_ascii=False, indent=2)
+        
+        # 发送优化结果通知
+        if self.config.get('notifications', {}).get('enabled', False):
+            self._send_parameter_optimization_notification(best_params, best_result, symbol, timeframe)
+        
+        logger.info(
+            f"参数优化完成 - 最佳参数: {best_params}\n"
+            f"最佳评分: {best_score:.2f} ({score_metric})\n"
+            f"回测回报率: {best_result.get('return_percent', 0):.2f}%\n"
+            f"最大回撤: {best_result.get('max_drawdown', 0):.2f}%\n"
+            f"结果保存路径: {opt_result_path}"
+        )
+        
+        return {
+            'success': True,
+            'best_parameters': best_params,
+            'best_result': best_result,
+            'best_score': best_score,
+            'all_results': optimization_results,
+            'optimization_path': opt_result_path,
+            'metadata': {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'score_metric': score_metric,
+                'total_combinations': total_combinations
+            }
+        }
+    
+    def _send_parameter_optimization_notification(self, best_params: Dict[str, Any], 
+                                                best_result: Dict[str, Any], symbol: str, timeframe: str) -> None:
+        """发送参数优化结果通知"""
+        try:
+            content = (
+                f"🔧 缠论参数优化完成通知\n"
+                f"=======================\n"
+                f"股票代码: {symbol}\n"
+                f"时间级别: {timeframe}\n"
+                f"优化目标: {self.config.get('optimization', {}).get('score_metric', 'sharpe_ratio')}\n"
+                f"=======================\n"
+                f"🏆 最佳参数:\n"
+            )
+            # 格式化参数输出
+            for param_name, param_value in best_params.items():
+                content += f"  • {param_name}: {param_value}\n"
+            
+            content += (
+                f"=======================\n"
+                f"📊 回测性能:\n"
+                f"  • 总回报率: {best_result.get('return_percent', 0):.2f}%\n"
+                f"  • 最大回撤: {best_result.get('max_drawdown', 0):.2f}%\n"
+                f"  • 夏普比率: {best_result.get('sharpe_ratio', 0):.2f}\n"
+                f"  • 胜率: {best_result.get('win_rate', 0)*100:.2f}%\n"
+                f"  • 交易次数: {best_result.get('total_trades', 0)}次\n"
+                f"=======================\n"
+                f"📁 详细结果: {self.config.get('optimization', {}).get('output_dir', 'outputs/optimization')}"
+            )
+            
+            self.notifier.send_text(content)
+            logger.info("参数优化结果通知发送完成")
+        except Exception as e:
+            logger.error(f"参数优化通知发送失败: {str(e)}", exc_info=True)
 
 class ChanlunBacktester:
-    """兼容层 - 保持原有接口"""
+    """缠论回测器外层包装类（提供统一调用接口）"""
     
-    def __init__(self, api, calculator, config=None):
-        self.engine = BacktestEngine(config or {})
-        self.api = api
-        self.calculator = calculator
+    def __init__(self, config_path: str = 'config/system.yaml'):
+        """初始化缠论回测器"""
+        self.config = load_config(config_path)
+        self.engine = BacktestEngine(self.config)
+        logger.info("ChanlunBacktester 初始化完成")
     
-    def run(self, symbol, timeframe, start, end, initial_capital=100000):
-        """
-        修改后的run方法：根据symbol、timeframe、start、end参数获取数据并执行回测
-        :param symbol: 股票代码
-        :param timeframe: 时间级别（weekly/daily/minute）
-        :param start: 开始日期
-        :param end: 结束日期
-        :param initial_capital: 初始资金，默认100000
-        :return: 回测结果
-        """
-        # 🔧🔧🔧🔧🔧🔧 防御性检查
+    def run(self, symbol: str, start_date: str, end_date: str, timeframe: str = 'weekly', 
+           initial_capital: float = 100000) -> Dict[str, Any]:
+        """运行单只股票回测"""
         self.engine._validate_symbol_not_dataframe(symbol)
-        
-        # 根据timeframe获取数据
-        if timeframe == 'weekly':
-            df = self.api.get_weekly_data(symbol, start, end)
-        elif timeframe == 'daily':
-            df = self.api.get_daily_data(symbol, start, end)
-        elif timeframe == 'minute':
-            df = self.api.get_minute_data(symbol, '5m', 30)
-        else:
-            raise ValueError(f"不支持的时间级别: {timeframe}")
-        
-        # 调用计算器的回测功能
-        return self.calculator.backtest(df, initial_capital, timeframe)
-    
-    def run_backtest(self, symbol, start_date, end_date, timeframe, initial_capital=100000):
-        """兼容原有run_backtest方法"""
         return self.engine.run_comprehensive_backtest(symbol, start_date, end_date, timeframe, initial_capital)
+    
+    def run_batch(self, symbols: List[str], start_date: str, end_date: str, timeframe: str = 'weekly', 
+                 initial_capital: float = 100000) -> Dict[str, Any]:
+        """运行批量回测"""
+        return self.engine.batch_backtest(symbols, start_date, end_date, timeframe, initial_capital)
+    
+    def optimize_params(self, symbol: str, start_date: str, end_date: str, param_ranges: Dict[str, List[Any]], 
+                       timeframe: str = 'daily') -> Dict[str, Any]:
+        """运行参数优化"""
+        return self.engine.optimize_parameters(symbol, start_date, end_date, param_ranges, timeframe)
 
 def main():
-    """主函数 - 保持原有逻辑"""
-    parser = argparse.ArgumentParser(description='缠论回测系统')
-    parser.add_argument('--mode', choices=['backtest', 'realtime', 'weekly_scan', 'pre_market', 'daily_report'], 
-                       default='backtest', help='运行模式')
-    parser.add_argument('--timeframe', choices=['daily', 'weekly', 'minute'], 
-                       default='weekly', help='时间级别')
-    parser.add_argument('--start', type=str, default='2023-11-08', 
-                       help='开始日期 (YYYY-MM-DD)')
-    parser.add_argument('--end', type=str, default='2025-11-08', 
-                       help='结束日期 (YYYY-MM-DD)')
-    parser.add_argument('--etf', type=str, default='sh510300', 
-                       help='ETF代码')
-    parser.add_argument('--capital', type=float, default=100000,
-                       help='初始资金')
-    parser.add_argument('--report_level', choices=['basic', 'detailed'], 
-                       default='detailed', help='报告详细程度')
+    """命令行入口函数"""
+    parser = argparse.ArgumentParser(description='缠论回测系统 - 命令行工具')
+    
+    # 基础参数
+    parser.add_argument('-c', '--config', default='config/system.yaml', help='配置文件路径')
+    parser.add_argument('-m', '--mode', required=True, choices=['single', 'batch', 'optimize'], help='运行模式：single(单只)/batch(批量)/optimize(参数优化)')
+    parser.add_argument('-s', '--symbol', help='股票代码（single/optimize模式必填）')
+    parser.add_argument('-S', '--symbols', nargs='+', help='股票代码列表（batch模式必填）')
+    parser.add_argument('-t', '--timeframe', default='daily', choices=['weekly', 'daily', 'minute'], help='时间级别')
+    parser.add_argument('--start_date', required=True, help='开始日期（YYYYMMDD或YYYY-MM-DD）')
+    parser.add_argument('--end_date', required=True, help='结束日期（YYYYMMDD或YYYY-MM-DD）')
+    parser.add_argument('--capital', type=float, default=100000, help='初始资金')
+    
+    # 参数优化相关参数
+    parser.add_argument('--param_ranges', type=str, help='参数范围JSON字符串（optimize模式必填）')
+    parser.add_argument('--score_metric', default='sharpe_ratio', choices=['sharpe_ratio', 'return_percent', 'profit_factor', 'win_rate'], help='优化目标指标')
+    
+    # 输出相关参数
+    parser.add_argument('--output_dir', default='outputs', help='输出目录')
+    parser.add_argument('--enable_notify', action='store_true', help='启用钉钉通知')
+    parser.add_argument('--enable_plot', action='store_true', help='启用图表生成')
+    parser.add_argument('--debug', action='store_true', help='调试模式（输出详细日志）')
     
     args = parser.parse_args()
     
-    # 加载配置
-    system_config = load_config()
+    # 调试模式配置
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        for handler in logger.handlers:
+            handler.setLevel(logging.DEBUG)
+        logger.debug("调试模式已启用")
     
-    # 使用新引擎
-    engine = BacktestEngine(system_config)
+    # 初始化回测器
+    try:
+        backtester = ChanlunBacktester(args.config)
+    except Exception as e:
+        logger.critical(f"回测器初始化失败: {str(e)}")
+        sys.exit(1)
     
-    if args.mode == 'backtest':
-        result = engine.run_comprehensive_backtest(
-            symbol=args.etf,
-            start_date=args.start,
-            end_date=args.end,
-            timeframe=args.timeframe,
-            initial_capital=args.capital
-        )
-        
-        if result.get('success', False):
-            logger.info("回测完成")
-            # 输出实际日期范围信息
-            actual_range = result.get('actual_date_range', {})
-            if actual_range:
-                logger.info(f"实际使用的日期范围: {actual_range.get('start')} 至 {actual_range.get('end')}")
-        else:
-            logger.error(f"回测失败: {result.get('error', '未知错误')}")
+    # 调整配置（使用setdefault避免KeyError）
+    # 初始化notifications配置（如果不存在）
+    if 'notifications' not in backtester.config:
+        backtester.config['notifications'] = {}
+    backtester.config['notifications']['enabled'] = args.enable_notify
     
-    elif args.mode == 'pre_market':
-        """盘前报告模式"""
-        logger.info("生成盘前报告")
-        
-        # 确保输出目录存在
-        os.makedirs("outputs/reports", exist_ok=True)
-        
-        # 生成盘前报告
-        report = generate_pre_market_report(
-            symbols=[args.etf],
-            api=engine.data_api,
-            calculator=engine.calculator,
-            start_date=args.start,
-            end_date=args.end
-        )
-        
-        # 保存报告
-        report_filename = f"pre_market_report_{args.etf}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(f"outputs/reports/{report_filename}", 'w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"盘前报告已保存: outputs/reports/{report_filename}")
-        print(json.dumps(report, indent=2, ensure_ascii=False))
+    # 初始化plotter配置（如果不存在）
+    if 'plotter' not in backtester.config:
+        backtester.config['plotter'] = {}
+    backtester.config['plotter']['enabled'] = args.enable_plot
     
-    elif args.mode == 'daily_report':
-        """盘后日报模式"""
-        logger.info("生成盘后日报")
-        
-        # 确保输出目录存在
-        os.makedirs("outputs/reports", exist_ok=True)
-        
-        # 生成盘后日报
-        report = generate_daily_report(
-            symbols=[args.etf],
-            api=engine.data_api,
-            calculator=engine.calculator,
-            start_date=args.start,
-            end_date=args.end
-        )
-        
-        # 保存报告
-        report_filename = f"daily_report_{args.etf}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(f"outputs/reports/{report_filename}", 'w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"盘后日报已保存: outputs/reports/{report_filename}")
-        print(json.dumps(report, indent=2, ensure_ascii=False))
+    # 初始化exporter配置（如果不存在）
+    if 'exporter' not in backtester.config:
+        backtester.config['exporter'] = {}
+    backtester.config['exporter']['output_dir'] = args.output_dir
     
-    else:
-        logger.info(f"{args.mode}模式暂未实现")
+    # 初始化optimization配置（如果不存在）
+    if args.mode == 'optimize' and 'optimization' not in backtester.config:
+        backtester.config['optimization'] = {}
+    if args.mode == 'optimize':
+        backtester.config['optimization']['score_metric'] = args.score_metric
+    
+    # 根据模式执行
+    try:
+        if args.mode == 'single':
+            # 单只股票回测
+            if not args.symbol:
+                logger.error("single模式必须指定--symbol参数")
+                sys.exit(1)
+            
+            result = backtester.run(
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                timeframe=args.timeframe,
+                initial_capital=args.capital
+            )
+            
+            # 输出结果摘要
+            if result.get('success', False):
+                logger.info("\n" + "="*50)
+                logger.info("单只股票回测结果摘要")
+                logger.info("="*50)
+                logger.info(f"股票代码: {args.symbol}")
+                logger.info(f"总回报率: {result.get('return_percent', 0):.2f}%")
+                logger.info(f"最大回撤: {result.get('max_drawdown', 0):.2f}%")
+                logger.info(f"交易次数: {result.get('total_trades', 0)}次")
+                logger.info(f"胜率: {result.get('win_rate', 0)*100:.2f}%")
+                logger.info(f"夏普比率: {result.get('sharpe_ratio', 0):.2f}")
+                logger.info(f"报告路径: {result['report'].get('export_info', {}).get('path', '未导出')}")
+                logger.info(f"图表路径: {result['charts'].get('chart_dir', '未生成')}")
+                logger.info("="*50)
+            else:
+                logger.error(f"回测失败: {result.get('error', '未知错误')}")
+                sys.exit(1)
+        
+        elif args.mode == 'batch':
+            # 批量回测
+            if not args.symbols:
+                logger.error("batch模式必须指定--symbols参数")
+                sys.exit(1)
+            
+            result = backtester.run_batch(
+                symbols=args.symbols,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                timeframe=args.timeframe,
+                initial_capital=args.capital
+            )
+            
+            # 输出批量结果摘要
+            logger.info("\n" + "="*50)
+            logger.info("批量回测结果摘要")
+            logger.info("="*50)
+            logger.info(f"总标的数: {len(args.symbols)}")
+            logger.info(f"成功: {result['success_count']}个")
+            logger.info(f"失败: {result['fail_count']}个")
+            logger.info(f"平均回报率: {result['summary']['avg_return']:.2f}%")
+            logger.info(f"最佳标的: {result['summary']['best_symbol']} ({result['summary']['max_return']:.2f}%)")
+            logger.info(f"最差标的: {result['summary']['worst_symbol']} ({result['summary']['min_return']:.2f}%)")
+            logger.info(f"盈利标的比例: {result['summary']['profitable_ratio']:.2f}%")
+            logger.info(f"批量报告路径: {result['report_path']}")
+            logger.info("="*50)
+        
+        elif args.mode == 'optimize':
+            # 参数优化
+            if not args.symbol:
+                logger.error("optimize模式必须指定--symbol参数")
+                sys.exit(1)
+            if not args.param_ranges:
+                logger.error("optimize模式必须指定--param_ranges参数（JSON字符串）")
+                sys.exit(1)
+            
+            # 解析参数范围
+            try:
+                param_ranges = json.loads(args.param_ranges)
+            except json.JSONDecodeError as e:
+                logger.error(f"param_ranges解析失败: {str(e)}")
+                sys.exit(1)
+            
+            result = backtester.optimize_params(
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                param_ranges=param_ranges,
+                timeframe=args.timeframe
+            )
+            
+            # 输出优化结果摘要
+            if result.get('success', False):
+                logger.info("\n" + "="*50)
+                logger.info("参数优化结果摘要")
+                logger.info("="*50)
+                logger.info(f"股票代码: {args.symbol}")
+                logger.info(f"优化目标: {args.score_metric}")
+                logger.info(f"最佳参数: {result['best_parameters']}")
+                logger.info(f"最佳评分: {result['best_score']:.2f}")
+                logger.info(f"回测回报率: {result['best_result'].get('return_percent', 0):.2f}%")
+                logger.info(f"最大回撤: {result['best_result'].get('max_drawdown', 0):.2f}%")
+                logger.info(f"优化结果路径: {result['optimization_path']}")
+                logger.info("="*50)
+            else:
+                logger.error(f"参数优化失败: {result.get('error', '未知错误')}")
+                sys.exit(1)
+        
+        logger.info("程序执行完成")
+        sys.exit(0)
+        
+    except Exception as e:
+        logger.critical(f"程序执行异常: {str(e)}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

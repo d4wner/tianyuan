@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 缠论股票分析系统主程序 - 完整修复版
-修复时间参数传递和周线处理逻辑问题
+修复内容：股票代码类型错误、日期格式处理、参数传递逻辑、周线数据处理等
 """
 
 import argparse
@@ -13,23 +13,28 @@ import sys
 import time
 import pandas as pd
 import yaml
+import json
 from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-# 修复导入错误：使用StockDataFetcher并重命名为StockDataAPI
+# 修复导入错误：确保正确引用数据获取器
 from src.data_fetcher import StockDataFetcher as StockDataAPI
-from src.config import load_config, save_config
+from src.config import load_config, save_config, ConfigManager
 from src.calculator import ChanlunCalculator
 from src.monitor import ChanlunMonitor
-from src.backtester import ChanlunBacktester
+from src.backtester import ChanlunBacktester, BacktestEngine
 from src.plotter import ChanlunPlotter
 from src.exporter import ChanlunExporter
-from src.reporter import generate_pre_market_report, generate_daily_report
+from src.reporter import generate_pre_market_report, generate_daily_report, generate_weekly_report
 from src.notifier import DingdingNotifier
-from src.utils import get_last_trading_day, is_trading_hour, get_valid_date_range_str
+from src.utils import (
+    get_last_trading_day, is_trading_hour, get_valid_date_range_str,
+    format_date, parse_date, validate_trading_date, get_date_range
+)
 
 # 配置日志
 logger = logging.getLogger('ChanlunSystem')
@@ -43,8 +48,13 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 def setup_logger(logfile=None):
-    """配置日志系统"""
+    """配置日志系统，支持文件输出"""
     if logfile:
+        # 确保日志目录存在
+        log_dir = os.path.dirname(logfile)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        
         # 创建文件处理器
         file_handler = logging.FileHandler(logfile)
         file_handler.setLevel(logging.INFO)
@@ -52,18 +62,21 @@ def setup_logger(logfile=None):
         logger.addHandler(file_handler)
 
 def load_etf_config(config_path: str = 'config/etfs.yaml') -> dict:
-    """加载ETF配置文件"""
+    """加载ETF配置文件，包含市场前缀等信息"""
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+            config = yaml.safe_load(f) or {}
         logger.info(f"成功加载ETF配置，共{len(config)}个类别")
         return config
+    except FileNotFoundError:
+        logger.warning(f"ETF配置文件未找到: {config_path}，使用默认配置")
+        return {}
     except Exception as e:
         logger.error(f"加载ETF配置失败: {str(e)}")
         return {}
 
 def get_market_prefix(symbol: str, etf_config: dict) -> str:
-    """根据ETF配置获取市场前缀"""
+    """根据ETF配置获取市场前缀（sh/sz）"""
     try:
         # 遍历所有类别（除了global）
         for category, etfs in etf_config.items():
@@ -77,37 +90,48 @@ def get_market_prefix(symbol: str, etf_config: dict) -> str:
                     return etf_info['market']
         
         # 如果没有找到配置，使用默认逻辑
-        if symbol.startswith(('5', '6', '9')):
+        if symbol.startswith(('5', '6', '9', '7')):  # 补充沪市代码前缀识别
             return 'sh'
         else:
             return 'sz'
             
     except Exception as e:
         logger.warning(f"获取市场前缀失败: {str(e)}，使用默认逻辑")
-        if symbol.startswith(('5', '6', '9')):
+        if symbol.startswith(('5', '6', '9', '7')):
             return 'sh'
         else:
             return 'sz'
 
 def adjust_symbol_format(symbol: str, etf_config: dict) -> str:
-    """调整股票代码格式，添加市场前缀"""
+    """
+    调整股票代码格式，确保添加正确的市场前缀
+    修复：添加类型检查，防止非字符串类型输入
+    """
+    # 核心修复：确保输入为字符串类型
+    if not isinstance(symbol, str):
+        raise TypeError(f"股票代码必须是字符串，实际为{type(symbol)}")
+    
+    # 移除可能的前缀，避免重复添加
+    if symbol.startswith(('sh', 'sz')):
+        return symbol
+    
     market_prefix = get_market_prefix(symbol, etf_config)
     full_symbol = f"{market_prefix}{symbol}"
     logger.info(f"股票代码格式调整: {symbol} -> {full_symbol}")
     return full_symbol
 
-def evaluate_market_status(api, calculator, symbols):
+def evaluate_market_status(api, calculator, symbols: List[str]) -> Dict[str, Any]:
     """
-    评估市场状态
-    :param api: 数据API
-    :param calculator: 缠论计算器
+    评估市场整体状态
+    :param api: 数据API实例
+    :param calculator: 缠论计算器实例
     :param symbols: 股票代码列表
-    :return: 市场状态评估结果
+    :return: 市场状态评估报告
     """
     logger.info("===== 市场状态评估 =====")
     
     status_report = {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%:%S"),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # 修复时间格式错误
         "overall_status": "unknown",
         "symbols_status": {},
         "trending_count": 0,
@@ -120,7 +144,7 @@ def evaluate_market_status(api, calculator, symbols):
     # 评估每只股票
     for symbol in symbols:
         try:
-            # 获取日线数据
+            # 获取日线数据（30天）
             start_date, end_date = get_valid_date_range_str(30)
             df = api.get_daily_data(symbol, start_date=start_date, end_date=end_date)
             
@@ -153,7 +177,7 @@ def evaluate_market_status(api, calculator, symbols):
                 status_report["breakout_count"] += 1
                 
         except Exception as e:
-            logger.error(f"评估股票 {symbol} 状态失败: {str(e)}")
+            logger.error(f"评估股票 {symbol} 状态失败: {str(e)}", exc_info=True)
             status_report["symbols_status"][symbol] = {
                 "condition": "error",
                 "error": str(e)
@@ -161,6 +185,10 @@ def evaluate_market_status(api, calculator, symbols):
     
     # 确定整体市场状态
     total_symbols = len(symbols)
+    if total_symbols == 0:
+        status_report["recommendation"] = "未提供股票代码"
+        return status_report
+        
     if status_report["trending_count"] / total_symbols > 0.6:
         status_report["overall_status"] = "trending_up"
         status_report["recommendation"] = "市场处于上升趋势，建议逢低买入"
@@ -176,11 +204,11 @@ def evaluate_market_status(api, calculator, symbols):
     
     return status_report
 
-def calculate_signal_strength(result_df):
+def calculate_signal_strength(result_df: pd.DataFrame) -> int:
     """
-    计算信号强度
+    计算信号强度（0-100）
     :param result_df: 包含缠论指标的DataFrame
-    :return: 信号强度(0-100)
+    :return: 信号强度值
     """
     if result_df.empty:
         return 0
@@ -188,27 +216,27 @@ def calculate_signal_strength(result_df):
     latest = result_df.iloc[-1]
     strength = 50  # 基准强度
     
-    # 根据分型增加强度
+    # 根据分型调整强度
     if latest.get('top_fractal', False):
         strength -= 10
     if latest.get('bottom_fractal', False):
         strength += 10
     
-    # 根据笔增加强度
+    # 根据笔调整强度
     if latest.get('pen_end', False):
         if latest.get('pen_type') == 'up':
             strength += 15
         else:
             strength -= 15
     
-    # 根据线段增加强度
+    # 根据线段调整强度
     if latest.get('segment_end', False):
         if latest.get('segment_type') == 'up':
             strength += 20
         else:
             strength -= 20
     
-    # 根据中枢增加强度
+    # 根据中枢调整强度
     if latest.get('central_bank', False):
         current_price = latest['close']
         central_high = latest.get('central_bank_high', current_price)
@@ -223,580 +251,525 @@ def calculate_signal_strength(result_df):
     
     return max(0, min(100, strength))  # 限制在0-100范围内
 
+def validate_date_format(date_str: str, format: str = "%Y%m%d") -> bool:
+    """验证日期格式是否符合要求"""
+    try:
+        datetime.strptime(date_str, format)
+        return True
+    except ValueError:
+        return False
+
+def run_monitor_mode(config: Dict[str, Any], symbols: List[str], interval: int = 300):
+    """运行监控模式，定时扫描市场信号"""
+    logger.info("===== 监控模式 =====")
+    
+    # 初始化组件
+    api = StockDataAPI(config.get('data_fetcher', {}))
+    calculator = ChanlunCalculator(config.get('chanlun', {}))
+    monitor = ChanlunMonitor(config.get('monitor', {}))
+    notifier = DingdingNotifier(config.get('dingding', {}))
+    
+    # 确保输出目录存在
+    os.makedirs("outputs/signals", exist_ok=True)
+    
+    try:
+        while True:
+            current_time = datetime.now()
+            logger.info(f"开始监控扫描: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 检查是否在交易时间
+            if not is_trading_hour() and not config.get('monitor', {}).get('scan_after_hours', False):
+                logger.info("非交易时间，跳过扫描")
+                time.sleep(interval)
+                continue
+            
+            # 扫描所有股票
+            for symbol in symbols:
+                try:
+                    # 获取分钟线数据
+                    df = api.get_minute_data(
+                        symbol, 
+                        period=config.get('minute_period', '5m'),
+                        days=config.get('minute_days', 3)
+                    )
+                    
+                    if df.empty:
+                        logger.warning(f"股票 {symbol} 分钟线数据为空")
+                        continue
+                    
+                    # 计算缠论信号
+                    result = calculator.calculate(df)
+                    signals = monitor.detect_signals(result)
+                    
+                    # 如果有信号，发送通知
+                    if signals:
+                        signal_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        signal_filename = f"outputs/signals/{symbol}_{signal_time}.json"
+                        
+                        # 保存信号
+                        with open(signal_filename, 'w', encoding='utf-8') as f:
+                            json.dump({
+                                "symbol": symbol,
+                                "time": signal_time,
+                                "signals": signals,
+                                "price": df.iloc[-1]['close'],
+                                "strength": calculate_signal_strength(result)
+                            }, f, indent=2, ensure_ascii=False)
+                        
+                        logger.info(f"检测到信号: {symbol} - {signals}")
+                        notifier.send_signal_notification(symbol, signals, df.iloc[-1]['close'])
+                
+                except Exception as e:
+                    logger.error(f"监控股票 {symbol} 时出错: {str(e)}", exc_info=True)
+            
+            # 等待下一次扫描
+            logger.info(f"监控扫描完成，等待 {interval} 秒后再次扫描")
+            time.sleep(interval)
+            
+    except KeyboardInterrupt:
+        logger.info("监控模式被用户中断")
+    except Exception as e:
+        logger.error(f"监控模式运行出错: {str(e)}", exc_info=True)
+
+def run_scan_once_mode(config: Dict[str, Any], symbols: List[str], plot: bool = False, export: bool = False):
+    """单次扫描模式，扫描一次后退出"""
+    logger.info("===== 单次扫描模式 =====")
+    
+    # 初始化组件
+    api = StockDataAPI(config.get('data_fetcher', {}))
+    calculator = ChanlunCalculator(config.get('chanlun', {}))
+    plotter = ChanlunPlotter(config.get('plotter', {})) if plot else None
+    exporter = ChanlunExporter(config.get('exporter', {})) if export else None
+    
+    # 确保输出目录存在
+    if plot:
+        os.makedirs("outputs/plots", exist_ok=True)
+    if export:
+        os.makedirs("outputs/exports", exist_ok=True)
+    
+    # 扫描所有股票
+    scan_results = {}
+    for symbol in symbols:
+        try:
+            logger.info(f"扫描股票: {symbol}")
+            
+            # 获取日线数据
+            start_date, end_date = get_valid_date_range_str(180)  # 半年数据
+            df = api.get_daily_data(symbol, start_date=start_date, end_date=end_date)
+            
+            if df.empty:
+                logger.warning(f"股票 {symbol} 日线数据为空")
+                continue
+            
+            # 计算缠论指标
+            result = calculator.calculate(df)
+            signals = calculator.detect_signals(result)
+            
+            # 记录结果
+            scan_results[symbol] = {
+                "signals": signals,
+                "latest_price": df.iloc[-1]['close'],
+                "signal_strength": calculate_signal_strength(result),
+                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            logger.info(f"股票 {symbol} 扫描完成，信号: {signals}")
+            
+            # 绘图
+            if plot and plotter:
+                plotter.plot(result, symbol, "daily")
+            
+            # 导出数据
+            if export and exporter:
+                exporter.export(result, symbol, "daily", config.get('output_format', 'csv'))
+        
+        except Exception as e:
+            logger.error(f"扫描股票 {symbol} 时出错: {str(e)}", exc_info=True)
+            scan_results[symbol] = {"error": str(e)}
+    
+    # 保存扫描结果
+    scan_filename = f"outputs/scan_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(scan_filename, 'w', encoding='utf-8') as f:
+        json.dump(scan_results, f, indent=2, ensure_ascii=False)
+    
+    logger.info(f"单次扫描完成，结果已保存至: {scan_filename}")
+    return scan_results
+
+def run_pre_market_mode(config: Dict[str, Any], symbols: List[str]):
+    """盘前报告模式，生成盘前分析报告"""
+    logger.info("===== 盘前报告模式 =====")
+    
+    # 初始化组件
+    api = StockDataAPI(config.get('data_fetcher', {}))
+    calculator = ChanlunCalculator(config.get('chanlun', {}))
+    notifier = DingdingNotifier(config.get('dingding', {}))
+    
+    # 确保输出目录存在
+    os.makedirs("outputs/reports", exist_ok=True)
+    
+    try:
+        # 获取上一个交易日
+        last_trading_day = get_last_trading_day()
+        logger.info(f"基于上一交易日数据生成报告: {last_trading_day}")
+        
+        # 生成盘前报告
+        report = generate_pre_market_report(
+            symbols=symbols,
+            api=api,
+            calculator=calculator,
+            start_date=format_date(parse_date(last_trading_day) - timedelta(days=60)),
+            end_date=last_trading_day
+        )
+        
+        # 保存报告
+        report_filename = f"pre_market_report_{datetime.now().strftime('%Y%m%d')}.json"
+        report_path = os.path.join("outputs/reports", report_filename)
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"盘前报告已保存: {report_path}")
+        
+        # 发送钉钉通知
+        notifier.send_report_notification("盘前报告", report)
+        
+        return report
+    
+    except Exception as e:
+        logger.error(f"生成盘前报告失败: {str(e)}", exc_info=True)
+        return {"error": str(e)}
+
+def run_daily_report_mode(config: Dict[str, Any], symbols: List[str]):
+    """盘后日报模式，生成每日交易报告"""
+    logger.info("===== 盘后日报模式 =====")
+    
+    # 初始化组件
+    api = StockDataAPI(config.get('data_fetcher', {}))
+    calculator = ChanlunCalculator(config.get('chanlun', {}))
+    notifier = DingdingNotifier(config.get('dingding', {}))
+    
+    # 确保输出目录存在
+    os.makedirs("outputs/reports", exist_ok=True)
+    
+    try:
+        # 获取当前交易日
+        today = datetime.now().strftime("%Y%m%d")
+        if not validate_trading_date(today):
+            logger.warning(f"{today} 不是交易日，使用上一交易日数据")
+            today = get_last_trading_day()
+        
+        # 生成盘后日报
+        report = generate_daily_report(
+            symbols=symbols,
+            api=api,
+            calculator=calculator,
+            start_date=format_date(parse_date(today) - timedelta(days=30)),
+            end_date=today
+        )
+        
+        # 保存报告
+        report_filename = f"daily_report_{today}.json"
+        report_path = os.path.join("outputs/reports", report_filename)
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"盘后日报已保存: {report_path}")
+        
+        # 发送钉钉通知
+        notifier.send_report_notification("盘后日报", report)
+        
+        return report
+    
+    except Exception as e:
+        logger.error(f"生成盘后日报失败: {str(e)}", exc_info=True)
+        return {"error": str(e)}
+
+def run_weekly_report_mode(config: Dict[str, Any], symbols: List[str]):
+    """周报告模式，生成每周分析报告"""
+    logger.info("===== 周报告模式 =====")
+    
+    # 初始化组件
+    api = StockDataAPI(config.get('data_fetcher', {}))
+    calculator = ChanlunCalculator(config.get('chanlun', {}))
+    notifier = DingdingNotifier(config.get('dingding', {}))
+    
+    # 确保输出目录存在
+    os.makedirs("outputs/reports/weekly", exist_ok=True)
+    
+    try:
+        # 获取本周范围
+        end_date = get_last_trading_day()
+        start_date = format_date(parse_date(end_date) - timedelta(days=30))  # 近30天数据
+        
+        # 生成周报告
+        report = generate_weekly_report(
+            symbols=symbols,
+            api=api,
+            calculator=calculator,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        # 保存报告
+        week_str = datetime.strptime(end_date, "%Y%m%d").strftime("%Y%W")
+        report_filename = f"weekly_report_{week_str}.json"
+        report_path = os.path.join("outputs/reports/weekly", report_filename)
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"周报告已保存: {report_path}")
+        
+        # 发送钉钉通知
+        notifier.send_report_notification("周报告", report)
+        
+        return report
+    
+    except Exception as e:
+        logger.error(f"生成周报告失败: {str(e)}", exc_info=True)
+        return {"error": str(e)}
+
+def run_backtest_mode(config: Dict[str, Any], symbols: List[str], args):
+    """回测模式，执行策略回测"""
+    logger.info("===== 回测模式 =====")
+    
+    # 验证参数
+    if not symbols:
+        logger.error("回测模式必须指定股票代码（--symbols）")
+        return
+    
+    # 验证日期格式
+    if not validate_date_format(args.start_date):
+        logger.error(f"开始日期格式错误: {args.start_date}，必须为YYYYMMDD")
+        return
+    if not validate_date_format(args.end_date):
+        logger.error(f"结束日期格式错误: {args.end_date}，必须为YYYYMMDD")
+        return
+    
+    # 转换日期格式为YYYY-MM-DD（内部使用格式）
+    start_date = f"{args.start_date[:4]}-{args.start_date[4:6]}-{args.start_date[6:8]}"
+    end_date = f"{args.end_date[:4]}-{args.end_date[6:8]}-{args.end_date[6:8]}"  # 修复日期切割错误
+    
+    # 初始化回测器
+    try:
+        backtester = ChanlunBacktester(config)
+        engine = BacktestEngine(config)
+        logger.info("回测引擎初始化成功")
+    except Exception as e:
+        logger.error(f"回测器初始化失败: {str(e)}", exc_info=True)
+        return
+    
+    # 处理股票代码（确保格式正确）
+    etf_config = load_etf_config()
+    try:
+        adjusted_symbols = [adjust_symbol_format(symbol, etf_config) for symbol in symbols]
+    except TypeError as e:
+        logger.error(f"股票代码处理失败: {str(e)}")
+        return
+    
+    # 执行回测（逐个处理股票）
+    backtest_results = {}
+    for symbol in adjusted_symbols:
+        try:
+            logger.info(f"开始回测: {symbol} ({args.timeframe}线)")
+            logger.info(f"日期范围: {start_date} 至 {end_date}")
+            
+            # 调用回测引擎
+            result = engine.run_comprehensive_backtest(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                timeframe=args.timeframe,
+                initial_capital=args.capital
+            )
+            
+            # 处理回测结果
+            if result.get('success', False):
+                logger.info(f"回测完成: {symbol}，总收益: {result.get('return_percent', 0):.2f}%")
+                backtest_results[symbol] = result
+                
+                # 输出实际日期范围信息
+                actual_range = result.get('actual_date_range', {})
+                if actual_range:
+                    logger.info(f"实际使用的日期范围: {actual_range.get('start')} 至 {actual_range.get('end')}")
+                
+                # 绘图
+                if args.plot:
+                    plotter = ChanlunPlotter(config.get('plotter', {}))
+                    plotter.plot(result['data'], symbol, args.timeframe)
+                
+                # 导出数据
+                if args.export:
+                    exporter = ChanlunExporter(config.get('exporter', {}))
+                    exporter.export(result['data'], symbol, args.timeframe, args.output_format)
+            else:
+                error_msg = result.get('error', '未知错误')
+                logger.error(f"回测失败: {symbol}，原因: {error_msg}")
+                backtest_results[symbol] = {"error": error_msg}
+        
+        except Exception as e:
+            logger.error(f"处理{symbol}回测时出错: {str(e)}", exc_info=True)
+            backtest_results[symbol] = {"error": str(e)}
+    
+    # 保存回测结果
+    if backtest_results:
+        result_filename = f"backtest_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        result_path = os.path.join("outputs/backtest", result_filename)
+        os.makedirs(os.path.dirname(result_path), exist_ok=True)
+        
+        with open(result_path, 'w', encoding='utf-8') as f:
+            json.dump(backtest_results, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"回测结果已保存至: {result_path}")
+    
+    return backtest_results
+
 def main():
-    """主函数"""
+    """主函数，解析参数并执行相应模式"""
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description='缠论股票分析系统')
     parser.add_argument('-v', '--version', action='version', version='%(prog)s 1.0')
-    parser.add_argument('-s', '--symbols', nargs='*', help='股票代码列表')
-    parser.add_argument('-i', '--interval', type=int, help='监控间隔(秒)')
-    parser.add_argument('-d', '--debug', action='store_true', help='调试模式')
-    parser.add_argument('-b', '--backtest', action='store_true', help='回测模式')
-    parser.add_argument('-p', '--plot', action='store_true', help='绘图模式')
-    parser.add_argument('-e', '--export', action='store_true', help='导出模式')
+    parser.add_argument('-s', '--symbols', nargs='*', help='股票代码列表（必填）')
+    parser.add_argument('-i', '--interval', type=int, default=300, help='监控间隔(秒)，默认300秒')
+    parser.add_argument('-d', '--debug', action='store_true', help='调试模式（输出详细日志）')
+    parser.add_argument('-b', '--backtest', action='store_true', help='回测模式（与--mode backtest等效）')
+    parser.add_argument('-p', '--plot', action='store_true', help='绘图模式（与其他模式配合使用）')
+    parser.add_argument('-e', '--export', action='store_true', help='导出模式（与其他模式配合使用）')
     parser.add_argument('-c', '--count', action='store_true', help='统计机会次数')
     parser.add_argument('-l', '--logfile', help='日志文件路径')
     parser.add_argument('--start_date', help='开始日期(YYYYMMDD)', default='20200101')
     parser.add_argument('--end_date', help='结束日期(YYYYMMDD)', default=datetime.now().strftime("%Y%m%d"))
     parser.add_argument('--period', type=str, help='统计周期(如6m表示6个月)', default='6m')
     parser.add_argument('--daemon', action='store_true', help='以守护进程模式运行')
+    parser.add_argument('--capital', type=float, default=100000, help='回测初始资金，默认100000')
+    parser.add_argument('--timeframe', choices=['weekly', 'daily', 'minute'], 
+                        default='daily', help='时间级别（回测/分析用）')
     
-    # 添加分钟数据相关参数
-    parser.add_argument('--mode', choices=['daily', 'minute', 'pre_market', 'intraday', 'post_market', 'scan_once', 'monitor', 'status', 'backtest'], 
-                        default='daily', help='运行模式: daily(日线), minute(分钟线), pre_market(盘前), intraday(盘中), post_market(盘后), scan_once(单次扫描), monitor(监控模式), status(状态评估), backtest(回测模式)')
-    parser.add_argument('--minute_period', default='5m', help='分钟周期')
-    parser.add_argument('--minute_days', type=int, default=3, help='分钟数据天数')
+    # 运行模式参数
+    parser.add_argument('--mode', choices=[
+        'daily', 'minute', 'pre_market', 'intraday', 
+        'post_market', 'scan_once', 'monitor', 'status', 'backtest', 'weekly_report'
+    ], default='daily', help='运行模式')
     
-    # 添加导出格式参数
+    # 分钟数据相关参数
+    parser.add_argument('--minute_period', default='5m', help='分钟周期，如5m/15m/30m')
+    parser.add_argument('--minute_days', type=int, default=3, help='分钟数据天数，默认3天')
+    
+    # 导出格式参数
     parser.add_argument('--output_format', choices=['csv', 'json', 'xlsx'], 
                         default='csv', help='导出格式: csv/json/xlsx')
     
-    # 添加新参数
-    parser.add_argument('--exceed_position', action='store_true', help='测试仓位超限场景')
-    parser.add_argument('--clean_cache', action='store_true', help='清理数据缓存')
-    parser.add_argument('--skip_network_check', action='store_true', help='跳过网络检查')
-    parser.add_argument('--test_notification', action='store_true', help='测试钉钉通知功能')
-    parser.add_argument('--notification_template', choices=['signal', 'error', 'alert'], 
-                        default='signal', help='通知模板: signal(信号), error(错误), alert(警报)')
-    # 新增状态评估参数
-    parser.add_argument('--status', action='store_true', help='评估市场状态')
-    
-    # 新增时间级别参数
-    parser.add_argument('--timeframe', choices=['daily', 'weekly', 'minute'], 
-                        default='daily', help='K线级别: daily(日线), weekly(周线), minute(分钟线)')
-
-    # 添加ETF参数作为symbols的别名
-    parser.add_argument('--etf', nargs='*', help='ETF代码列表（与--symbols相同）')
-    
-    # 添加报告级别参数
-    parser.add_argument('--report_level', choices=['simple', 'detailed'], default='simple', help='报告级别: simple(简单), detailed(详细)')
-
     args = parser.parse_args()
     
-    # 如果提供了--etf参数，将其值赋给--symbols
-    if args.etf and not args.symbols:
-        args.symbols = args.etf
-    
-    # 设置默认日志文件
-    if not args.logfile:
-        # 创建日志目录
-        log_dir = 'logs'
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        args.logfile = os.path.join(log_dir, 'system.log')
-    
     # 配置日志
-    setup_logger(args.logfile)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        console_handler.setLevel(logging.DEBUG)
+    if args.logfile:
+        setup_logger(args.logfile)
     
+    # 加载系统配置
     try:
-        # 加载系统配置
-        system_config = load_config()
-        
-        # 加载ETF配置
-        etf_config = load_etf_config()
-        
-        # 清理缓存
-        if args.clean_cache:
-            logger.info("===== 清理缓存 =====")
-            cache_dirs = [
-                'data/daily',
-                'data/minute',
-                'data/signals',
-                'outputs/backtest',
-                'outputs/plots',
-                'outputs/reports'
-            ]
-            
-            for dir in cache_dirs:
-                if os.path.exists(dir):
-                    shutil.rmtree(dir)
-                    os.makedirs(dir)
-                    logger.info(f"已清理: {dir}")
-            
-            logger.info("缓存清理完成")
-            return
-        
-        # 仓位超限测试
-        if args.exceed_position:
-            logger.warning("===== 仓位超限测试 =====")
-            # 强制设置仓位超限
-            system_config['risk_management']['max_total_position'] = 1.5
-            system_config['risk_management']['max_single_position'] = 0.6
-            save_config(system_config)
-            logger.warning("已设置仓位超限参数")
-        
-        # 更新配置
-        if args.interval:
-            system_config['monitoring']['interval'] = args.interval
-            save_config(system_config)
-        
-        # 创建API实例
-        api = StockDataAPI(
-            max_retries=system_config.get('data_fetcher', {}).get('max_retries', 3),
-            timeout=system_config.get('data_fetcher', {}).get('timeout', 10)
-        )
-        
-        # 创建计算器
-        calculator = ChanlunCalculator(
-            config=system_config.get('chanlun', {})
-        )
-        
-        # 创建通知器
-        notifier = DingdingNotifier()
-        
-        # 钉钉通知测试
-        if args.test_notification:
-            logger.info("===== 钉钉通知测试 =====")
-            
-            # 根据选择的模板发送测试通知
-            if args.notification_template == 'signal':
-                logger.info("发送交易信号测试通知")
-                signal_details = {
-                    "signal_type": "buy",
-                    "price": 4.55,
-                    "target_price": 4.85,
-                    "stoploss": 4.40,
-                    "position_size": 0.3,
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "strategy": "缠论底分型突破",
-                    "confidence": 0.85
-                }
-                symbol = args.symbols[0] if args.symbols else "510300"
-                notifier.send_signal(symbol, signal_details)
-            elif args.notification_template == 'error':
-                logger.info("发送错误通知测试")
-                error_msg = "系统测试错误: 钉钉通知功能验证"
-                notifier.send_error(error_msg)
-            elif args.notification_template == 'alert':
-                logger.info("发送风险警报测试通知")
-                alert_details = {
-                    "alert_type": "止损触发",
-                    "price": 4.40,
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "message": "价格跌破关键支撑位",
-                    "suggestion": "立即平仓"
-                }
-                symbol = args.symbols[0] if args.symbols else "510300"
-                notifier.send_alert(symbol, alert_details)
-            
-            logger.info("钉钉通知测试完成，请检查钉钉是否收到消息")
-            return
-        
-        # 新增状态评估模式
-        if args.status or args.mode == 'status':
-            logger.info("===== 市场状态评估模式 =====")
-            
-            # 如果没有指定股票代码，从配置文件中加载
-            if not args.symbols:
-                try:
-                    # 获取所有ETF代码
-                    all_etfs = []
-                    for category in etf_config:
-                        if category != 'global' and isinstance(etf_config[category], dict):
-                            all_etfs.extend(list(etf_config[category].keys()))
-                    
-                    # 确保所有股票代码都是字符串类型
-                    args.symbols = [str(symbol) for symbol in all_etfs]
-                    logger.info(f"从配置文件加载 {len(args.symbols)} 只ETF")
-                    
-                except Exception as e:
-                    logger.error(f"加载ETF配置异常: {str(e)}")
-                    sys.exit(1)
-            
-            # 评估市场状态
-            status_report = evaluate_market_status(api, calculator, args.symbols)
-            
-            # 打印评估结果
-            logger.info(f"市场状态评估完成 - 时间: {status_report['timestamp']}")
-            logger.info(f"整体市场状态: {status_report['overall_status']}")
-            logger.info(f"趋势股数量: {status_report['trending_count']}")
-            logger.info(f"震荡股数量: {status_report['ranging_count']}")
-            logger.info(f"下跌股数量: {status_report['declining_count']}")
-            logger.info(f"突破股数量: {status_report['breakout_count']}")
-            logger.info(f"操作建议: {status_report['recommendation']}")
-            
-            # 打印每只股票的状态
-            logger.info("===== 个股状态详情 =====")
-            for symbol, status in status_report['symbols_status'].items():
-                if 'error' in status:
-                    logger.info(f"{symbol}: 错误 - {status['error']}")
-                else:
-                    logger.info(f"{symbol}: {status['condition']}, 价格: {status['price']}, 量能: {status['volume']}, 信号强度: {status['signal_strength']}")
-            
-            return
-        
-        # 如果没有指定股票代码，从配置文件中加载
-        if not args.symbols:
-            try:
-                # 获取所有ETF代码
-                all_etfs = []
-                for category in etf_config:
-                    if category != 'global' and isinstance(etf_config[category], dict):
-                        all_etfs.extend(list(etf_config[category].keys()))
-                
-                # 确保所有股票代码都是字符串类型
-                args.symbols = [str(symbol) for symbol in all_etfs]
-                logger.info(f"从配置文件加载 {len(args.symbols)} 只ETF")
-                
-            except Exception as e:
-                logger.error(f"加载ETF配置异常: {str(e)}")
-                sys.exit(1)
-        else:
-            # 确保命令行传入的股票代码也是字符串类型
-            args.symbols = [str(symbol) for symbol in args.symbols]
-        
-        # 机会统计模式
-        if args.count:
-            logger.info("===== 机会统计模式 =====")
-            # 解析统计周期
-            period_months = int(args.period.rstrip('m'))
-            
-            for symbol in args.symbols:
-                logger.info(f"统计股票: {symbol} 周期: {period_months}个月")
-                
-                # 获取有效的日期范围字符串
-                start_date_str, end_date_str = get_valid_date_range_str(period_months*30)
-                logger.info(f"使用日期范围: {start_date_str} 至 {end_date_str}")
-                
-                # 调整股票代码格式
-                full_symbol = adjust_symbol_format(symbol, etf_config)
-                
-                # 获取数据
-                df = api.get_daily_data(full_symbol, start_date=start_date_str, end_date=end_date_str)
-                
-                if df.empty:
-                    logger.warning(f"股票 {symbol} 获取数据为空，跳过统计")
-                    continue
-                
-                # 计算缠论指标
-                result = calculator.calculate(df)
-                
-                # 统计机会次数
-                if 'signal' in result.columns:
-                    opportunities = len(result[result['signal'] == 'buy'])
-                else:
-                    # 使用底分型作为机会指标
-                    logger.warning("数据中无信号列，使用分型作为机会指标")
-                    opportunities = len(result[result['bottom_fractal'] == True])
-                
-                logger.info(f"股票 {symbol} 在过去 {period_months} 个月共有 {opportunities} 次交易机会")
-            
-            logger.info("机会统计完成")
-            return
-        
-        # 盘前模式
-        if args.mode == 'pre_market':
-            logger.info("===== 盘前模式 =====")
-            if not args.symbols:
-                logger.error("盘前模式需要指定股票代码")
-                return
-                
-            # 使用有效的日期范围字符串
-            start_date_str, end_date_str = get_valid_date_range_str(30)
-            logger.info(f"使用日期范围: {start_date_str} 至 {end_date_str}")
-            
-            # 使用正式的generate_pre_market_report函数
-            report = generate_pre_market_report(args.symbols, api, calculator, start_date_str, end_date_str)
-            logger.info(f"盘前报告生成完成: {report}")
-            return
-        
-        # 盘中模式
-        if args.mode == 'intraday':
-            logger.info("===== 盘中模式 =====")
-            if not args.symbols:
-                logger.error("盘中模式需要指定股票代码")
-                return
-                
-            monitor = ChanlunMonitor(
-                system_config=system_config,
-                api=api,
-                calculator=calculator,
-                notifier=notifier
-            )
-            
-            # 添加监控股票
-            for symbol in args.symbols:
-                monitor.add_symbol(symbol)
-            
-            # 启动监控
-            monitor.start()
-            return
-        
-        # 盘后模式
-        if args.mode == 'post_market':
-            logger.info("===== 盘后模式 =====")
-            if not args.symbols:
-                logger.error("盘后模式需要指定股票代码")
-                return
-                
-            # 使用有效的日期范围
-            start_date_str, end_date_str = get_valid_date_range_str(30)
-            logger.info(f"使用日期范围: {start_date_str} 至 {end_date_str}")
-            
-            # 使用正式的generate_daily_report函数
-            report = generate_daily_report(args.symbols, api, calculator, start_date_str, end_date_str)
-            logger.info(f"盘后报告生成完成: {report}")
-            return
-        
-        # 单次扫描模式
-        if args.mode == 'scan_once':
-            logger.info("===== 单次扫描模式 =====")
-            if not args.symbols:
-                logger.error("单次扫描模式需要指定股票代码")
-                return
-                
-            for symbol in args.symbols:
-                # 双重确保股票代码是字符串类型
-                symbol = str(symbol)
-                logger.info(f"扫描股票: {symbol}")
-                
-                # 调整股票代码格式
-                full_symbol = adjust_symbol_format(symbol, etf_config)
-                
-                # 获取分钟数据
-                df = api.get_minute_data(full_symbol, period=args.minute_period, days=args.minute_days)
-                
-                if df.empty:
-                    logger.warning(f"股票 {symbol} 获取数据为空，跳过扫描")
-                    continue
-                
-                # 计算缠论指标
-                result = calculator.calculate(df)
-                
-                # 检测交易信号
-                if 'signal' in result.columns and 'buy' in result['signal'].values:
-                    logger.info(f"检测到交易信号: {symbol}")
-                    # 发送钉钉通知
-                    signal_details = result[result['signal'] == 'buy'].iloc[-1].to_dict()
-                    notifier.send_signal(symbol, signal_details)
-                else:
-                    logger.info(f"未检测到交易信号: {symbol}")
-            
-            logger.info("扫描完成，进程退出")
-            return
-        
-        # 监控模式
-        if args.mode == 'monitor':
-            logger.info("===== 监控模式 =====")
-            if not args.symbols:
-                logger.error("监控模式需要指定股票代码")
-                return
-                
-            monitor = ChanlunMonitor(
-                system_config=system_config,
-                api=api,
-                calculator=calculator,
-                notifier=notifier
-            )
-            
-            # 添加监控股票
-            for symbol in args.symbols:
-                monitor.add_symbol(symbol)
-            
-            # 启动监控
-            monitor.start()
-            return
-        
-        # 回测模式
-        if args.backtest or args.mode == 'backtest':
-            logger.info("===== 回测模式 =====")
-            if not args.symbols:
-                logger.error("回测模式需要指定股票代码")
-                return
-                
-            backtester = ChanlunBacktester(
-                api=api,
-                calculator=calculator,
-                config=system_config.get('backtest', {})
-            )
-            
-            for symbol in args.symbols:
-                logger.info(f"回测股票: {symbol}")
-                
-                # 使用有效的日期范围字符串
-                start_date_str, end_date_str = get_valid_date_range_str(30)
-                logger.info(f"{args.timeframe}线数据回测: {symbol} {start_date_str} 至 {end_date_str}")
-                
-                # 调整股票代码格式
-                full_symbol = adjust_symbol_format(symbol, etf_config)
-                
-                # 根据时间级别获取数据
-                if args.timeframe == 'daily':
-                    df = api.get_daily_data(full_symbol, start_date=start_date_str, end_date=end_date_str)
-                elif args.timeframe == 'weekly':
-                    # 使用周线数据
-                    df = api.get_weekly_data(full_symbol, start_date=start_date_str, end_date=end_date_str)
-                elif args.timeframe == 'minute':
-                    # 使用分钟数据
-                    df = api.get_minute_data(full_symbol, period=args.minute_period, days=args.minute_days)
-                else:
-                    logger.error(f"不支持的时间级别: {args.timeframe}")
-                    continue
-                
-                if df.empty:
-                    logger.warning(f"股票 {symbol} 获取数据为空，跳过回测")
-                    continue
-                
-                # 执行回测 - 修复：传递timeframe参数和时间参数
-                backtest_result = backtester.run(
-                    df, 
-                    timeframe=args.timeframe,
-                    start=start_date_str,  # 新增：传递开始日期
-                    end=end_date_str      # 新增：传递结束日期
-                )
-                logger.info(f"回测结果: {backtest_result}")
-            
-            logger.info("回测完成")
-            return
-        
-        # 调试模式
-        if args.debug:
-            logger.info("===== 调试模式 =====")
-            if not args.symbols:
-                logger.error("调试模式需要指定股票代码")
-                return
-                
-            symbol = args.symbols[0]
-            logger.info(f"处理股票: {symbol}")
-            
-            # 调整股票代码格式
-            full_symbol = adjust_symbol_format(symbol, etf_config)
-            
-            if args.mode == 'minute':
-                logger.info(f"请求分钟数据: {symbol} {args.minute_period} 最近 {args.minute_days} 天")
-                df = api.get_minute_data(full_symbol, period=args.minute_period, days=args.minute_days)
-            else:
-                # 获取有效日期范围字符串
-                start_date_str, end_date_str = get_valid_date_range_str(30)
-                logger.info(f"请求日线数据: {symbol} {start_date_str} 至 {end_date_str}")
-                df = api.get_daily_data(full_symbol, start_date=start_date_str, end_date=end_date_str)
-            
-            if df.empty:
-                logger.warning(f"股票 {symbol} 获取数据为空")
-            else:
-                logger.info(f"获取数据成功: {len(df)} 条")
-                # 计算缠论指标
-                result = calculator.calculate(df)
-                logger.info(f"缠论计算结果: {len(result)} 条")
-                # 打印前几行
-                logger.info(f"\n{result.head()}")
-            
-            logger.info("调试模式完成")
-            return
-        
-        # 绘图模式
-        if args.plot:
-            logger.info("===== 绘图模式 =====")
-            if not args.symbols:
-                logger.error("绘图模式需要指定股票代码")
-                return
-                
-            plotter = ChanlunPlotter(
-                config=system_config.get('plot', {})
-            )
-            
-            for symbol in args.symbols:
-                logger.info(f"绘制股票: {symbol}")
-                
-                # 调整股票代码格式
-                full_symbol = adjust_symbol_format(symbol, etf_config)
-                
-                if args.mode == 'minute':
-                    logger.info(f"分钟数据绘图: {symbol} {args.minute_period} 最近 {args.minute_days} 天")
-                    df = api.get_minute_data(full_symbol, period=args.minute_period, days=args.minute_days)
-                else:
-                    # 获取有效日期范围字符串
-                    start_date_str, end_date_str = get_valid_date_range_str(30)
-                    logger.info(f"日线数据绘图: {symbol} {start_date_str} 至 {end_date_str}")
-                    df = api.get_daily_data(full_symbol, start_date=start_date_str, end_date=end_date_str)
-                
-                if df.empty:
-                    logger.warning(f"股票 {symbol} 获取数据为空，跳过绘图")
-                    continue
-                
-                # 计算缠论指标
-                result = calculator.calculate(df)
-                
-                # 绘制图表
-                plotter.plot(result, symbol)
-            
-            logger.info("绘图完成")
-            return
-        
-        # 导出模式
-        if args.export:
-            logger.info("===== 导出模式 =====")
-            if not args.symbols:
-                logger.error("导出模式需要指定股票代码")
-                return
-                
-            exporter = ChanlunExporter(
-                config=system_config.get('export', {})
-            )
-            exporter.output_format = args.output_format
-            
-            for symbol in args.symbols:
-                logger.info(f"导出股票: {symbol} 格式: {args.output_format}")
-                
-                # 调整股票代码格式
-                full_symbol = adjust_symbol_format(symbol, etf_config)
-                
-                if args.mode == 'minute':
-                    logger.info(f"分钟数据导出: {symbol} {args.minute_period} 最近 {args.minute_days} 天")
-                    df = api.get_minute_data(full_symbol, period=args.minute_period, days=args.minute_days)
-                else:
-                    # 获取有效日期范围字符串
-                    start_date_str, end_date_str = get_valid_date_range_str(30)
-                    logger.info(f"日线数据导出: {symbol} {start_date_str} 至 {end_date_str}")
-                    df = api.get_daily_data(full_symbol, start_date=start_date_str, end_date=end_date_str)
-                
-                if df.empty:
-                    logger.warning(f"股票 {symbol} 获取数据为空，跳过导出")
-                    continue
-                
-                # 计算缠论指标
-                result = calculator.calculate(df)
-                
-                # 导出数据
-                exporter.export(result, symbol)
-            
-            logger.info(f"导出完成: 格式={args.output_format}")
-            return
-        
-        # 监控模式
-        logger.info("===== 监控模式 =====")
-        if not args.symbols:
-            logger.error("监控模式需要指定股票代码")
-            return
-            
-        monitor = ChanlunMonitor(
-            system_config=system_config,
-            api=api,
-            calculator=calculator,
-            notifier=notifier
-        )
-        
-        # 添加监控股票
-        for symbol in args.symbols:
-            monitor.add_symbol(symbol)
-        
-        # 启动监控
-        monitor.start()
-        
+        config = load_config('config/system.yaml')
+        logger.info("配置文件加载成功: config/system.yaml")
     except Exception as e:
-        logger.critical(f"系统崩溃: {str(e)}")
-        import traceback
-        logger.critical(traceback.format_exc())
+        logger.error(f"配置文件加载失败: {str(e)}")
+        return
+    
+    # 处理股票代码（如果未提供，尝试从配置中获取）
+    etf_config = load_etf_config()
+    symbols = args.symbols or config.get('default_symbols', [])
+    
+    if not symbols:
+        logger.error("未提供股票代码，请使用--symbols参数指定")
+        return
+    
+    # 调整股票代码格式
+    try:
+        adjusted_symbols = [adjust_symbol_format(symbol, etf_config) for symbol in symbols]
+    except TypeError as e:
+        logger.error(f"股票代码处理失败: {str(e)}")
+        return
+    
+    # 根据模式执行相应功能
+    if args.mode == 'backtest' or args.backtest:
+        # 强制设置为回测模式
+        run_backtest_mode(config, adjusted_symbols, args)
+    
+    elif args.mode == 'status':
+        # 市场状态评估模式
+        api = StockDataAPI(config.get('data_fetcher', {}))
+        calculator = ChanlunCalculator(config.get('chanlun', {}))
+        report = evaluate_market_status(api, calculator, adjusted_symbols)
+        logger.info(f"市场状态评估结果: {report['overall_status']}")
+        logger.info(f"操作建议: {report['recommendation']}")
         
-        # 发送钉钉通知
-        try:
-            # 创建新的通知器实例
-            notifier = DingdingNotifier()
-            notifier.send_error(f"系统崩溃: {str(e)}")
-        except Exception as notifier_error:
-            logger.error(f"发送钉钉通知失败: {str(notifier_error)}")
+        # 保存状态报告
+        status_filename = f"market_status_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(os.path.join("outputs/status", status_filename), 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+    
+    elif args.mode == 'monitor':
+        # 监控模式
+        run_monitor_mode(config, adjusted_symbols, args.interval)
+    
+    elif args.mode == 'scan_once':
+        # 单次扫描模式
+        run_scan_once_mode(config, adjusted_symbols, args.plot, args.export)
+    
+    elif args.mode == 'pre_market':
+        # 盘前报告模式
+        run_pre_market_mode(config, adjusted_symbols)
+    
+    elif args.mode == 'post_market' or args.mode == 'daily':
+        # 盘后日报模式
+        run_daily_report_mode(config, adjusted_symbols)
+    
+    elif args.mode == 'weekly_report':
+        # 周报告模式
+        run_weekly_report_mode(config, adjusted_symbols)
+    
+    elif args.mode == 'minute':
+        # 分钟线分析模式
+        logger.info("===== 分钟线分析模式 =====")
+        api = StockDataAPI(config.get('data_fetcher', {}))
+        calculator = ChanlunCalculator(config.get('chanlun', {}))
+        plotter = ChanlunPlotter(config.get('plotter', {})) if args.plot else None
         
-        # 退出程序
-        sys.exit(1)
+        for symbol in adjusted_symbols:
+            try:
+                df = api.get_minute_data(
+                    symbol, 
+                    period=args.minute_period,
+                    days=args.minute_days
+                )
+                
+                if df.empty:
+                    logger.warning(f"股票 {symbol} 分钟线数据为空")
+                    continue
+                
+                result = calculator.calculate(df)
+                signals = calculator.detect_signals(result)
+                logger.info(f"{symbol} ({args.minute_period}) 信号: {signals}")
+                
+                if args.plot and plotter:
+                    plotter.plot(result, symbol, args.minute_period)
+                
+                if args.export:
+                    exporter = ChanlunExporter(config.get('exporter', {}))
+                    exporter.export(result, symbol, args.minute_period, args.output_format)
+            
+            except Exception as e:
+                logger.error(f"处理{symbol}分钟线数据时出错: {str(e)}", exc_info=True)
+    
+    elif args.mode == 'intraday':
+        # 盘中模式（实时更新）
+        logger.info("===== 盘中模式 =====")
+        if not is_trading_hour():
+            logger.warning("当前非交易时间，盘中模式仅在交易时间有效")
+        
+        run_monitor_mode(config, adjusted_symbols, interval=60)  # 缩短监控间隔至1分钟
+    
+    else:
+        logger.warning(f"未知模式: {args.mode}")
 
 if __name__ == "__main__":
     main()
