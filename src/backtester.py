@@ -162,7 +162,6 @@ class BacktestEngine:
             self.data_api = StockDataAPI(
                 max_retries=data_fetcher_config.get('max_retries', MAX_RETRY_COUNT),
                 timeout=data_fetcher_config.get('timeout', 10),
-                proxy=data_fetcher_config.get('proxy', None)
             )
             logger.info("数据API初始化成功")
         except Exception as e:
