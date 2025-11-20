@@ -1,0 +1,462 @@
+# 缠论系统配置文件 - 完整修复版
+# 确保所有配置项完整且一致
+
+# 计算器配置
+calculator:
+  weekly_pen_min_length: 3
+  weekly_central_min_length: 3
+  daily_pen_min_length: 5
+  daily_central_min_length: 5
+  minute_pen_min_length: 10
+  minute_central_min_length: 10
+
+# 风险管理配置
+risk_management:
+  black_swan_rules:
+  - weekly_bottom_divergence_confirmed
+  - weekly_volatility > 5%
+  - weekly_volume_abnormal_increase > 150%
+  - daily_confirmation_required
+  volume_thresholds:
+    absolute:
+      abnormal_volume: 180000000
+      contraction_threshold: 70000000
+      normal_breakthrough: 120000000
+      strong_breakthrough: 150000000
+    percentage:
+      abnormal_volume: 180%
+      contraction_threshold: 70%
+      normal_breakthrough: 120%
+      strong_breakthrough: 150%
+  stop_loss_settings:
+    stop_loss_type: "dynamic"
+    stop_loss_atr_period: 14
+    stop_loss_atr_multiplier: 2.0
+    stop_loss_default: 0.03
+    trailing_stop_enabled: true
+    trailing_stop_activation: 0.05
+    trailing_stop_distance: 0.02
+    emergency_stop_loss: 0.10
+
+# 策略映射配置
+strategy_mapping:
+  daily: config/strategy_daily.yaml
+  weekly: config/strategy_weekly.yaml
+  minute: config/strategy_minute.yaml
+
+# 策略配置
+strategies:
+  daily:
+    buy_points:
+      first_buy:
+        confidence_level: high
+        execution_timing:
+        - minute_oversold
+        - volume_contraction<0.7
+        position_range:
+        - 0.1
+        - 0.15
+        required_conditions:
+        - weekly_bottom_divergence
+        - daily_trend_confirmation
+        stop_loss: 0.03
+      second_buy:
+        confidence_level: very_high
+        execution_timing:
+        - minute_golden_cross
+        - volume_expansion>1.5
+        position_range:
+        - 0.4
+        - 0.5
+        required_conditions:
+        - weekly_pullback_confirmation
+        - daily_reversal_signal
+        stop_loss: 0.02
+      third_buy:
+        confidence_level: medium
+        execution_timing:
+        - minute_breakout
+        - volume>1.2
+        position_range:
+        - 0.2
+        - 0.25
+        required_conditions:
+        - weekly_breakout_confirmation
+        - daily_consolidation
+        stop_loss: 0.025
+    timeframe_priority:
+      execution: minute
+      primary: weekly
+      secondary: daily
+    version: 2025-10-16
+  weekly:
+    buy_points:
+      first_buy:
+        confidence_level: high
+        execution_timing:
+        - weekly_pullback
+        - volume_contraction<0.7
+        position_range:
+        - 0.1
+        - 0.15
+        required_conditions:
+        - monthly_trend_confirmation
+        - weekly_divergence
+        stop_loss: 0.03
+      second_buy:
+        confidence_level: very_high
+        execution_timing:
+        - weekly_golden_cross
+        - volume_expansion>1.5
+        position_range:
+        - 0.4
+        - 0.5
+        required_conditions:
+        - weekly_pullback_confirmation
+        - daily_reversal_signal
+        stop_loss: 0.02
+      third_buy:
+        confidence_level: medium
+        execution_timing:
+        - weekly_breakout
+        - volume>1.2
+        position_range:
+        - 0.2
+        - 0.25
+        required_conditions:
+        - weekly_breakout_confirmation
+        - daily_consolidation
+        stop_loss: 0.025
+    timeframe_priority:
+      execution: daily
+      primary: weekly
+      secondary: monthly
+    version: 2025-10-16
+  minute:
+    buy_points:
+      first_buy:
+        confidence_level: medium
+        execution_timing:
+        - minute_breakout
+        - volume_expansion>1.2
+        position_range:
+        - 0.05
+        - 0.1
+        required_conditions:
+        - daily_trend_confirmation
+        stop_loss: 0.02
+      second_buy:
+        confidence_level: high
+        execution_timing:
+        - minute_golden_cross
+        - volume_expansion>1.5
+        position_range:
+        - 0.2
+        - 0.3
+        required_conditions:
+        - daily_confirmation
+        stop_loss: 0.015
+    timeframe_priority:
+      execution: minute
+      primary: daily
+      secondary: weekly
+    version: 2025-10-16
+
+# 系统核心配置
+system:
+  # 数据获取器配置
+  data_fetcher:
+    type_safety: true
+    data_sources:
+    - sina
+    - tencent
+    sina:
+      symbol_format: with_prefix
+      base_url: http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData
+      params:
+        daily:
+          scale: "240"
+          ma: "no"
+          datalen: "1000"
+        weekly:
+          scale: "week"
+          ma: "no"
+          datalen: "500"
+        minute:
+          scale: "5"
+          ma: "no"
+          datalen: "10000"
+    tencent:
+      symbol_format: with_prefix
+      enabled: true
+      weekly_url: https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
+      params:
+        weekly:
+          _var: "kline_week"
+          param: "{symbol},week,,,320,qfq"
+  
+  # 自动风险控制
+  auto_risk_control:
+    enabled: true
+    max_consecutive_loss: 3
+    max_daily_loss: 0.05
+    volatility_protection: true
+    volume_anomaly_detection: true
+    weekly_review: true
+  
+  # 回测配置
+  backtest:
+    initial_capital: 100000
+    commission: 0.0003
+    slippage: 0.0001
+    risk_free_rate: 0.03
+    max_position_per_trade: 0.5
+    min_data_days: 90
+    start_date: "2024-01-01"
+    end_date: "2025-11-06"
+    timeframe: weekly
+  
+  # 备份配置
+  backup:
+    auto_backup: true
+    backup_dir: backups/data
+    backup_interval_hours: 24
+    max_backup_files: 7
+    weekly_backup: true
+  
+  # 缠论参数配置
+  chanlun:
+    weekly:
+      pen_min_length: 5
+      segment_min_length: 5
+      central_bank_min_bars: 3
+      fractal_sensitivity: 3
+      divergence_confirmation: 2
+    daily:
+      pen_min_length: 5
+      segment_min_length: 8
+      central_bank_min_bars: 5
+      fractal_sensitivity: 3
+      divergence_confirmation: 3
+    minute:
+      pen_min_length: 10
+      segment_min_length: 15
+      central_bank_min_bars: 10
+      fractal_sensitivity: 5
+      divergence_confirmation: 5
+    life_line_period: 20
+    ranging_threshold: 0.015
+    confirm_break_days: 2
+  
+  # 数据保留天数
+  data_retention_days: 90
+  
+  # 数据重试配置
+  data_retry:
+    max_retries: 3
+    retry_delay: 1
+    timeout: 10
+    exponential_backoff: true
+  
+  # 数据源配置
+  data_source:
+    name: sina
+    preferred_timeframes:
+    - weekly
+    - daily
+    fallback_sources:
+    - tencent
+    max_retries: 3
+    timeout: 10
+    retry_attempts: 3
+  
+  # 数据存储配置
+  data_storage:
+    daily_data_dir: data/daily
+    weekly_data_dir: data/weekly
+    minute_data_dir: data/minute
+    signals_dir: data/signals
+    positions_path: data/signals/positions.json
+    backup_dir: backups/data
+    weekly_reports_dir: outputs/weekly_reports
+  
+  # 钉钉通知配置
+  dingding:
+    access_token: "1332588108dbdce65e6f5a8d196210517101ac53408e372fc1a6fa8944c20391"
+    alert_levels:
+      emergency: true
+      warning: true
+      info: false
+    position_units: 50
+    weekly_report: true
+  
+  # 数据导出配置
+  export:
+    output_dir: outputs/exports
+    format: csv
+    weekly_reports: true
+    auto_clean_days: 30
+  
+  # 日志级别
+  log_level: info
+  
+  # 运行模式
+  mode: monitor
+  
+  # 监控配置
+  monitoring:
+    primary_interval: 86400
+    secondary_interval: 3600
+    realtime_alert: true
+    end_of_day_no_new_positions: true
+    last_trading_hour: 14
+    weekly_scan_day: 5
+    monthly_scan_day: 28
+  
+  # 性能配置
+  performance:
+    cache_enabled: true
+    cache_expiry_hours: 24
+    max_concurrent_requests: 5
+    weekly_data_priority: true
+  
+  # 性能监控
+  performance_monitor: true
+  
+  # 绘图配置
+  plot:
+    auto_save: true
+    format: png
+    resolution: 1920x1080
+    output_dir: outputs/plots
+    preferred_timeframes:
+    - weekly
+    - daily
+    - minute
+  
+  # 实时监控配置
+  realtime_monitoring:
+    enabled: true
+    scan_interval: 10
+    signal_expiry_minutes: 5
+    min_volume_threshold: 1000000
+    weekly_scan_enabled: true
+  
+  # 风险管理配置
+  risk_management:
+    black_swan_rules:
+    - weekly_bottom_divergence
+    - volatility>5%
+    - volume_abnormal_increase>150%
+    consecutive_loss_control:
+      enabled: true
+      max_consecutive_losses: 3
+      daily_loss_threshold: 0.02
+      suspension_days: 7
+    emergency_control: true
+    market_conditions:
+      black_swan: 0.4
+      declining: 0.0
+      ranging: 0.3
+      trending: 0.7
+    position_control:
+      weekly_signal:
+        base_position: 0.4
+        daily_adjustment: ±0.2
+      minute_execution:
+        max_adjustment: 0.1
+    trading_suspension_days: 7
+    stop_loss_settings:
+      stop_loss_type: "dynamic"
+      stop_loss_atr_period: 14
+      stop_loss_atr_multiplier: 2.0
+      stop_loss_default: 0.03
+      trailing_stop_enabled: true
+      trailing_stop_activation: 0.05
+      trailing_stop_distance: 0.02
+      emergency_stop_loss: 0.10
+  
+  # 策略配置
+  strategy:
+    active: "缠论周线主导策略"
+    buy_points:
+      first_buy:
+        confidence_level: high
+        execution_timing:
+        - minute_oversold
+        - volume_contraction<0.7
+        position_range:
+        - 0.1
+        - 0.15
+        required_conditions:
+        - weekly_bottom_divergence
+        - daily_trend_confirmation
+        stop_loss: 0.03
+      second_buy:
+        confidence_level: very_high
+        execution_timing:
+        - minute_golden_cross
+        - volume_expansion>1.5
+        position_range:
+        - 0.4
+        - 0.5
+        required_conditions:
+        - weekly_pullback_confirmation
+        - daily_reversal_signal
+        stop_loss: 0.02
+      third_buy:
+        confidence_level: medium
+        execution_timing:
+        - minute_breakout
+        - volume>1.2
+        position_range:
+        - 0.2
+        - 0.25
+        required_conditions:
+        - weekly_breakout_confirmation
+        - daily_consolidation
+        stop_loss: 0.025
+    timeframe_priority:
+      execution: minute
+      primary: weekly
+      secondary: daily
+    version: "2025-10-16"
+  
+  # 时间级别配置
+  timeframe_config:
+    default_timeframe: weekly
+    supported_timeframes:
+    - weekly
+    - daily
+    - minute
+    fallback_priority:
+    - weekly
+    - daily
+    - minute
+    sync_across_timeframes: true
+    enabled: true
+  
+  # 交易时间配置
+  trading_hours:
+    morning_start: "09:30"
+    morning_end: "11:30"
+    afternoon_start: "13:00"
+    afternoon_end: "15:00"
+    weekly_analysis_start: "20:00"
+    weekly_analysis_end: "22:00"
+  
+  # 周策略配置
+  weekly_strategy:
+    enabled: true
+    min_weeks_data: 52
+    scan_day: 5
+    analysis_hours:
+    - 20
+    - 22
+    divergence_confirmation: 2
+    timeframe_fallback: daily
+    trend_confirmation: true
+    volume_analysis: true
+
+# 自动启动配置
+auto_start: true

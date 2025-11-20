@@ -1,0 +1,234 @@
+# 文件树锚点 🚩
+# - config/
+#   |-- risk_rules.yaml (风控规则配置文件)
+# 修复说明：移除连续亏损暂停规则，保留其他风控参数
+
+# 黑天鹅规则
+black_swan_rules:
+  - weekly_bottom_divergence_confirmed
+  - weekly_volatility > 5%
+  - weekly_volume_abnormal_increase > 150%
+  - daily_confirmation_required
+
+# 买点规则
+buy_point_rules:
+  first_buy:
+    conditions:
+      - weekly_bottom_divergence_confirmed
+      - weekly_MACD_golden_cross
+      - weekly_break_trend_line
+      - weekly_volume_contraction < 70%
+      - daily_confirmation
+    confidence_level: high
+    position_size:
+      - 0.1
+      - 0.15
+    stop_loss: 0.03
+    timeframe: weekly
+  second_buy:
+    conditions:
+      - weekly_pullback_above_prior_low
+      - weekly_volume_contraction_then_expansion
+      - weekly_volume > 150%
+      - daily_confirmation
+    confidence_level: very_high
+    position_size:
+      - 0.4
+      - 0.5
+    stop_loss: 0.02
+    timeframe: weekly
+  third_buy:
+    conditions:
+      - weekly_pullback_above_central_bank_upper
+      - weekly_volume > 120%
+      - daily_confirmation
+    confidence_level: medium
+    position_size:
+      - 0.2
+      - 0.25
+    stop_loss: 0.025
+    timeframe: weekly
+
+# 背驰规则
+divergence_rules:
+  bottom_divergence:
+    conditions:
+      - price_new_low
+      - indicator_higher_low
+      - volume_expansion
+      - break_downtrend_line
+    confirmations:
+      - daily
+    required_timeframes:
+      - weekly
+    volume_threshold: 1.5
+  strength_levels:
+    medium:
+      action: reduce_position 0.3
+      conditions:
+        - price_divergence
+        - volume_divergence
+    strong:
+      action: reduce_position 0.5
+      conditions:
+        - price_divergence
+        - volume_divergence
+        - indicator_divergence
+    weak:
+      action: monitor_only
+      conditions:
+        - price_divergence
+  top_divergence:
+    conditions:
+      - price_new_high
+      - indicator_lower_high
+      - volume_divergence
+      - break_uptrend_line
+    confirmations:
+      - daily
+    required_timeframes:
+      - weekly
+    volume_threshold: 1.5
+
+# 紧急规则
+emergency_rules:
+  immediate_sell_all:
+    action: sell_all_positions
+    conditions:
+      - weekly_black_swan_event_detected
+      - weekly_market_crash > 0.05
+      - weekly_volume > 200%
+    timeframe: weekly
+  trading_suspension:
+    action: suspend_trading_7_days
+    conditions:
+      - weekly_consecutive_loss_weeks >= 2
+    timeframe: weekly
+
+# 生命线规则
+life_line_rules:
+  actions:
+    - trigger_third_sell
+    - reduce_exposure 0.5
+    - enable_extra_monitoring
+  break_definition: weekly_close_below_ma
+  confirmation_required: true
+  consecutive_weeks: 2
+  ma_periods:
+    - 20
+    - 60
+  timeframe: weekly
+  volume_threshold: 130%
+
+# 市场条件
+market_conditions:
+  black_swan:
+    condition: weekly_black_swan_detected
+    position_limit: 0.4
+  declining:
+    condition: weekly_trending_down
+    position_limit: 0.0
+  ranging:
+    condition: weekly_ranging
+    position_limit: 0.3
+  trending:
+    condition: weekly_trending_up
+    position_limit: 0.7
+
+# 仓位控制
+position_control:
+  minute_execution:
+    max_adjustment: 0.1
+  timeframe_weights:
+    daily: 0.3
+    minute: 0.1
+    weekly: 0.6
+  weekly_signal:
+    base_position: 0.4
+    daily_adjustment: ±0.2
+
+# 卖点规则
+sell_point_rules:
+  first_sell:
+    conditions:
+      - weekly_top_divergence_confirmed
+      - weekly_MACD_dead_cross
+      - weekly_break_trend_line_down
+      - weekly_volume_abnormal_increase > 150%
+      - daily_confirmation
+    position_adjust: -0.5
+    stop_loss: 0.02
+    timeframe: weekly
+  second_sell:
+    conditions:
+      - weekly_rebound_below_prior_high
+      - weekly_volume_contraction
+      - weekly_daily_drop > 0.03
+      - daily_confirmation
+    position_adjust: -0.3
+    stop_loss: 0.015
+    timeframe: weekly
+  third_sell:
+    conditions:
+      - weekly_break_life_line
+      - weekly_consecutive_break_days >= 2
+      - weekly_volume > 130%
+      - daily_confirmation
+    position_adjust: -0.2
+    stop_loss: 0.01
+    timeframe: weekly
+
+# 信号生成
+signal_generation:
+  buy:
+    execution_timing:
+      - minute_oversold
+      - volume_contraction<0.7
+    required_conditions:
+      - weekly_bottom_divergence
+      - daily_trend_confirmation
+    timeframe: weekly
+  sell:
+    execution_timing:
+      - minute_overbought
+      - volume_expansion>1.5
+    required_conditions:
+      - weekly_top_divergence
+      - daily_trend_confirmation
+    timeframe: weekly
+
+# 时间规则
+time_rules:
+  avoid_end_of_week: true
+  last_day_no_new_positions: true
+  morning_session_preferred: true
+  weekly_analysis_day: 5
+  weekly_analysis_hours:
+    - 20
+    - 22
+
+# 成交量阈值
+volume_thresholds:
+  absolute:
+    abnormal_volume: 180000000
+    contraction_threshold: 70000000
+    normal_breakthrough: 120000000
+    strong_breakthrough: 150000000
+  percentage:
+    abnormal_volume: 180%
+    contraction_threshold: 70%
+    normal_breakthrough: 120%
+    strong_breakthrough: 150%
+  note: 绝对值为具体数值，百分比为相对变化率
+
+# 周线工作流
+weekly_workflow:
+  step_1: weekly_scan
+  step_2: divergence_detection
+  step_3: daily_confirmation
+  step_4: minute_execution
+  step_5: position_adjustment
+  timeframe_priority:
+    - weekly
+    - daily
+    - minute

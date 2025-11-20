@@ -1,0 +1,27 @@
+# 核心依赖
+pandas>=1.5.0
+numpy>=1.23.0
+requests>=2.28.0
+matplotlib>=3.6.0
+pyyaml>=6.0
+python-dateutil>=2.8.2
+
+# 数据获取与处理
+pandas-market-calendars>=4.3.0
+pytz>=2023.3
+
+# 日志管理
+loguru>=0.6.0
+
+# 测试框架
+pytest>=7.2.0
+pytest-cov>=4.0.0
+
+# 数据导出
+openpyxl>=3.0.0
+xlsxwriter>=3.0.0
+
+# 开发工具
+black>=22.10.0
+flake8>=5.0.0
+isort>=5.10.0

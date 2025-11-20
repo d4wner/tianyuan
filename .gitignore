@@ -1,0 +1,9 @@
+# 前端项目示例
+*.py~
+*.pyc
+dist/
+.env
+.vscode/
+*.log
+chanlun_env
+log
