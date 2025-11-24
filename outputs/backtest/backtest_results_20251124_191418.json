@@ -1,0 +1,11 @@
+{
+  "sz000001": {
+    "success": true,
+    "return_percent": 3.4162419417333436,
+    "data": null,
+    "final_capital": 620497.4516504001,
+    "max_drawdown": 14.112254285936073,
+    "trade_count": 1,
+    "win_rate": 0.0
+  }
+}

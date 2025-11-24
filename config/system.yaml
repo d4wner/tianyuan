@@ -344,6 +344,16 @@ system:
     min_volume_threshold: 1000000
     weekly_scan_enabled: true
   
+  # 小时级别信号检测配置
+  hourly_signal:
+    enabled: true
+    scan_interval_minutes: 15
+    fractal_sensitivity: 3
+    prediction_threshold: 0.6
+    focus_etfs: ["512660", "510300", "510500"]
+    trading_hours_only: true
+    volume_factor: 1.2
+  
   # 风险管理配置
   risk_management:
     black_swan_rules:

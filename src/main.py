@@ -328,13 +328,29 @@ def run_scan_once_mode(config: Dict[str, Any], symbols: List[str], plot: bool = 
             
             # 计算缠论指标
             result = calculator.calculate(df)
-            signals = calculator.detect_signals(result)
+            # 从结果中获取信号
+            signals = [item for item in result['data'] if item.get('signal') in ['buy', 'sell']]
+            # 将结果数据转换为DataFrame
+            result_df = pd.DataFrame(result['data'])
             
             # 记录结果
+            # 转换signals中的Timestamp对象为字符串
+            serializable_signals = []
+            for signal in signals:
+                serializable_signal = signal.copy()
+                # 检查并转换date字段
+                if 'date' in serializable_signal and hasattr(serializable_signal['date'], 'strftime'):
+                    serializable_signal['date'] = serializable_signal['date'].strftime('%Y-%m-%d')
+                # 转换其他可能的datetime字段
+                for key, value in serializable_signal.items():
+                    if hasattr(value, 'strftime'):
+                        serializable_signal[key] = value.strftime('%Y-%m-%d %H:%M:%S')
+                serializable_signals.append(serializable_signal)
+            
             scan_results[symbol] = {
-                "signals": signals,
+                "signals": serializable_signals,
                 "latest_price": df.iloc[-1]['close'],
-                "signal_strength": calculate_signal_strength(result),
+                "signal_strength": calculate_signal_strength(result_df),
                 "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
@@ -342,11 +358,11 @@ def run_scan_once_mode(config: Dict[str, Any], symbols: List[str], plot: bool = 
             
             # 绘图
             if plot and plotter:
-                plotter.plot(result, symbol, "daily")
+                plotter.plot(result_df, symbol)
             
             # 导出数据
             if export and exporter:
-                exporter.export(result, symbol, "daily", config.get('output_format', 'csv'))
+                exporter.export(result_df, symbol, "daily", config.get('output_format', 'csv'))
         
         except Exception as e:
             logger.error(f"扫描股票 {symbol} 时出错: {str(e)}", exc_info=True)
@@ -566,7 +582,7 @@ def run_backtest_mode(config: Dict[str, Any], symbols: List[str], args):
                 # 绘图
                 if args.plot and hasattr(result, 'data'):
                     plotter = ChanlunPlotter(config.get('plotter', {}))
-                    plotter.plot(result.data, symbol, args.timeframe)
+                    plotter.plot(result.data, symbol)
                 
                 # 导出数据
                 if args.export and hasattr(result, 'data'):
@@ -723,7 +739,7 @@ def main():
                 logger.info(f"{symbol} ({args.minute_period}) 信号: {signals}")
                 
                 if args.plot and plotter:
-                    plotter.plot(result, symbol, args.minute_period)
+                    plotter.plot(result, symbol)
                 
                 if args.export:
                     exporter = ChanlunExporter(config.get('exporter', {}))

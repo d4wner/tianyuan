@@ -1,0 +1,5 @@
+{
+  "sh512660": {
+    "error": "'ChanlunCalculator' object has no attribute 'detect_signals'"
+  }
+}

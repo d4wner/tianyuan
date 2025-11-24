@@ -10,14 +10,18 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.notifier import DingdingNotifier
+from src.config import load_etf_config
 from datetime import datetime
 
 def test_enhanced_signal_template():
     """
     测试增强版交易信号模板，包含缠论级别、交易金额和周线确认等信息
     """
+    # 加载ETF配置
+    etf_config = load_etf_config()
+    
     # 创建通知器实例
-    notifier = DingdingNotifier()
+    notifier = DingdingNotifier({'etfs': etf_config})
     
     # 创建包含所有增强字段的测试信号
     symbol = "512660"
@@ -43,6 +47,7 @@ def test_enhanced_signal_template():
     buy_message = notifier._format_signal_message(symbol, buy_signal_details)
     print(f"QT: {buy_message}")
     print("\n确认是否包含以下字段:")
+    print(f"- ETF中文名: {'军工ETF' in buy_message}")
     print(f"- 交易金额: {'交易金额:' in buy_message}")
     print(f"- 缠论级别: {'缠论级别: 二买' in buy_message}")
     print(f"- 信号详情: {'日线底分型形成' in buy_message}")
@@ -69,6 +74,7 @@ def test_enhanced_signal_template():
     sell_message = notifier._format_signal_message(symbol, sell_signal_details)
     print(f"QT: {sell_message}")
     print("\n确认是否包含以下字段:")
+    print(f"- ETF中文名: {'军工ETF' in sell_message}")
     print(f"- 交易金额: {'交易金额:' in sell_message}")
     print(f"- 缠论级别: {'缠论级别: 一卖' in sell_message}")
     print(f"- 信号详情: {'日线顶背驰' in sell_message}")
@@ -101,7 +107,9 @@ def test_with_actual_enhanced_data():
             buy_signals = [s for s in signals if s['type'] == 'buy'][-2:]  # 最近2个买入信号
             sell_signals = [s for s in signals if s['type'] == 'sell'][-2:]  # 最近2个卖出信号
             
-            notifier = DingdingNotifier()
+            # 加载ETF配置
+            etf_config = load_etf_config()
+            notifier = DingdingNotifier({'etfs': etf_config})
             symbol = "512660"
             
             # 测试买入信号
@@ -143,6 +151,8 @@ def test_with_actual_enhanced_data():
                 print(f"QT: {message}")
     else:
         print(f"增强信号文件不存在: {signals_file}")
+    
+    print("\n测试ETF中文名显示功能完成")
 
 if __name__ == "__main__":
     print("=" * 60)

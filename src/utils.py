@@ -391,13 +391,18 @@ def is_trading_hour() -> bool:
     
     return morning_session or afternoon_session
 
-def get_valid_date_range_str(days: int) -> Tuple[str, str]:
+def get_valid_date_range_str(days: int, include_latest: bool = True) -> Tuple[str, str]:
     """
-    获取有效的日期范围字符串（结束日为上一交易日）
+    获取有效的日期范围字符串
     :param days: 天数
+    :param include_latest: 是否包含最新数据（今天），默认为True
     :return: (start_date, end_date) 格式为%Y%m%d
     """
-    end_date = get_last_trading_day()
+    # 根据参数决定是否使用今天作为结束日期
+    if include_latest:
+        end_date = datetime.today()
+    else:
+        end_date = get_last_trading_day()
     start_date = end_date - timedelta(days=days)
     return format_date(start_date), format_date(end_date)
 
