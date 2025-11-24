@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 直接导入依赖模块（不再使用降级逻辑）
 from src.config import load_config
-from src.data_fetcher import StockDataAPI
+from src.data_fetcher import StockDataFetcher as StockDataAPI
 from src.calculator import ChanlunCalculator
 from src.notifier import DingdingNotifier
 from src.utils import get_last_trading_day, is_trading_hour, get_valid_date_range_str

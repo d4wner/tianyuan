@@ -23,17 +23,17 @@ sys.path.insert(0, project_root)
 
 # 修复导入错误：确保正确引用数据获取器
 from src.data_fetcher import StockDataFetcher as StockDataAPI
-from src.config import load_config, save_config, ConfigManager
+from src.config import load_config, save_config
 from src.calculator import ChanlunCalculator
 from src.monitor import ChanlunMonitor
-from src.backtester import ChanlunBacktester, BacktestEngine
+from src.backtester import BacktestEngine
 from src.plotter import ChanlunPlotter
 from src.exporter import ChanlunExporter
-from src.reporter import generate_pre_market_report, generate_daily_report, generate_weekly_report
+from src.reporter import generate_pre_market_report, generate_daily_report
 from src.notifier import DingdingNotifier
 from src.utils import (
     get_last_trading_day, is_trading_hour, get_valid_date_range_str,
-    format_date, parse_date, validate_trading_date, get_date_range
+    format_date, parse_date, get_date_range
 )
 
 # 配置日志
@@ -266,65 +266,30 @@ def run_monitor_mode(config: Dict[str, Any], symbols: List[str], interval: int =
     # 初始化组件
     api = StockDataAPI(config.get('data_fetcher', {}))
     calculator = ChanlunCalculator(config.get('chanlun', {}))
-    monitor = ChanlunMonitor(config.get('monitor', {}))
     notifier = DingdingNotifier(config.get('dingding', {}))
+    
+    # 正确初始化监控器（修复：使用正确的参数顺序和配置）
+    monitor = ChanlunMonitor(
+        system_config=config,
+        api=api,
+        calculator=calculator,
+        notifier=notifier
+    )
+    
+    # 覆盖监控间隔（如果提供）
+    if interval > 0:
+        monitor.interval = interval
+    
+    # 添加所有监控股票
+    for symbol in symbols:
+        monitor.add_symbol(symbol)
     
     # 确保输出目录存在
     os.makedirs("outputs/signals", exist_ok=True)
     
     try:
-        while True:
-            current_time = datetime.now()
-            logger.info(f"开始监控扫描: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            # 检查是否在交易时间
-            if not is_trading_hour() and not config.get('monitor', {}).get('scan_after_hours', False):
-                logger.info("非交易时间，跳过扫描")
-                time.sleep(interval)
-                continue
-            
-            # 扫描所有股票
-            for symbol in symbols:
-                try:
-                    # 获取分钟线数据
-                    df = api.get_minute_data(
-                        symbol, 
-                        period=config.get('minute_period', '5m'),
-                        days=config.get('minute_days', 3)
-                    )
-                    
-                    if df.empty:
-                        logger.warning(f"股票 {symbol} 分钟线数据为空")
-                        continue
-                    
-                    # 计算缠论信号
-                    result = calculator.calculate(df)
-                    signals = monitor.detect_signals(result)
-                    
-                    # 如果有信号，发送通知
-                    if signals:
-                        signal_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        signal_filename = f"outputs/signals/{symbol}_{signal_time}.json"
-                        
-                        # 保存信号
-                        with open(signal_filename, 'w', encoding='utf-8') as f:
-                            json.dump({
-                                "symbol": symbol,
-                                "time": signal_time,
-                                "signals": signals,
-                                "price": df.iloc[-1]['close'],
-                                "strength": calculate_signal_strength(result)
-                            }, f, indent=2, ensure_ascii=False)
-                        
-                        logger.info(f"检测到信号: {symbol} - {signals}")
-                        notifier.send_signal_notification(symbol, signals, df.iloc[-1]['close'])
-                
-                except Exception as e:
-                    logger.error(f"监控股票 {symbol} 时出错: {str(e)}", exc_info=True)
-            
-            # 等待下一次扫描
-            logger.info(f"监控扫描完成，等待 {interval} 秒后再次扫描")
-            time.sleep(interval)
+        # 调用监控器的start方法，使用其内部的循环逻辑
+        monitor.start()
             
     except KeyboardInterrupt:
         logger.info("监控模式被用户中断")
@@ -546,15 +511,14 @@ def run_backtest_mode(config: Dict[str, Any], symbols: List[str], args):
     
     # 转换日期格式为YYYY-MM-DD（内部使用格式）
     start_date = f"{args.start_date[:4]}-{args.start_date[4:6]}-{args.start_date[6:8]}"
-    end_date = f"{args.end_date[:4]}-{args.end_date[6:8]}-{args.end_date[6:8]}"  # 修复日期切割错误
+    end_date = f"{args.end_date[:4]}-{args.end_date[4:6]}-{args.end_date[6:8]}"  # 正确的日期格式转换
     
     # 初始化回测器
     try:
-        backtester = ChanlunBacktester(config)
         engine = BacktestEngine(config)
         logger.info("回测引擎初始化成功")
     except Exception as e:
-        logger.error(f"回测器初始化失败: {str(e)}", exc_info=True)
+        logger.error(f"回测引擎初始化失败: {str(e)}", exc_info=True)
         return
     
     # 处理股票代码（确保格式正确）
@@ -572,36 +536,44 @@ def run_backtest_mode(config: Dict[str, Any], symbols: List[str], args):
             logger.info(f"开始回测: {symbol} ({args.timeframe}线)")
             logger.info(f"日期范围: {start_date} 至 {end_date}")
             
-            # 调用回测引擎
-            result = engine.run_comprehensive_backtest(
+            # 创建回测参数对象
+            from src.backtester import BacktestParams
+            params = BacktestParams(
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
                 timeframe=args.timeframe,
-                initial_capital=args.capital
+                initial_capital=args.capital,
+                enable_short=hasattr(args, 'enable_short') and args.enable_short
             )
             
+            # 调用回测引擎
+            result = engine.run_backtest(params)
+            
             # 处理回测结果
-            if result.get('success', False):
-                logger.info(f"回测完成: {symbol}，总收益: {result.get('return_percent', 0):.2f}%")
-                backtest_results[symbol] = result
-                
-                # 输出实际日期范围信息
-                actual_range = result.get('actual_date_range', {})
-                if actual_range:
-                    logger.info(f"实际使用的日期范围: {actual_range.get('start')} 至 {actual_range.get('end')}")
+            if result and result.success:
+                logger.info(f"回测完成: {symbol}，总收益: {result.return_percent:.2f}%")
+                backtest_results[symbol] = {
+                    'success': True,
+                    'return_percent': result.return_percent,
+                    'data': getattr(result, 'data', None),
+                    'final_capital': result.final_capital,
+                    'max_drawdown': result.max_drawdown,
+                    'trade_count': result.trade_count,
+                    'win_rate': result.win_rate
+                }
                 
                 # 绘图
-                if args.plot:
+                if args.plot and hasattr(result, 'data'):
                     plotter = ChanlunPlotter(config.get('plotter', {}))
-                    plotter.plot(result['data'], symbol, args.timeframe)
+                    plotter.plot(result.data, symbol, args.timeframe)
                 
                 # 导出数据
-                if args.export:
+                if args.export and hasattr(result, 'data'):
                     exporter = ChanlunExporter(config.get('exporter', {}))
-                    exporter.export(result['data'], symbol, args.timeframe, args.output_format)
+                    exporter.export(result.data, symbol, args.timeframe, args.output_format)
             else:
-                error_msg = result.get('error', '未知错误')
+                error_msg = result.error if result else '未知错误'
                 logger.error(f"回测失败: {symbol}，原因: {error_msg}")
                 backtest_results[symbol] = {"error": error_msg}
         

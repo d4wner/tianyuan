@@ -8,7 +8,7 @@ import json
 import requests
 import logging
 from datetime import datetime
-from config import load_config
+from src.config import load_config
 
 logger = logging.getLogger('DingdingNotifier')
 

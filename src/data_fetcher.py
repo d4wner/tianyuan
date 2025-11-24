@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-股票数据获取器 - 修复版本
-修复了日期范围不正确和符号验证问题
-添加了日期范围完整性检查
-"""
+"""股票数据获取器 - 精简版（保留核心功能）"""
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -20,1106 +16,653 @@ import random
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Union, Any
+from typing import Optional, Dict, List, Union, Any, Callable, Tuple
+from unittest.mock import Mock
 
-# 添加项目根目录到Python路径
+# 项目路径配置
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# 配置导入（兼容无配置文件场景）
 try:
-    from src.config import get_data_fetcher_config, get_backtest_config, get_strategy_config
+    from src.config import get_data_fetcher_config
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
-    logging.warning("无法导入配置模块，使用默认配置")
+    logging.warning("未导入配置模块，使用默认配置")
 
+# 日志配置（精简）
 logger = logging.getLogger('StockDataFetcher')
 logger.setLevel(logging.INFO)
-
-# 配置日志处理器
 if not logger.handlers:
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(handler)
 
 class DataFetchError(Exception):
     """数据获取异常"""
     pass
 
 class StockDataFetcher:
-    """高效股票数据获取器 - 修复日期范围和符号验证问题"""
+    """高效股票数据获取器（精简版）"""
     
-    def __init__(self, max_retries: int = None, timeout: int = None):
-        """
-        初始化数据获取器
-        :param max_retries: 最大重试次数
-        :param timeout: 请求超时时间(秒)
-        """
-        # 加载配置或使用默认值
+    def __init__(self, max_retries: int = None, timeout: int = None,
+                 http_client: Optional[Callable] = None):
+        """初始化：依赖注入+配置加载"""
+        self.http_client = http_client or requests.get
+        
+        # 加载配置或默认值
         if CONFIG_AVAILABLE:
             try:
                 config = get_data_fetcher_config()
-                
-                # 设置参数
                 self.max_retries = max_retries or config.get('max_retries', 3)
                 self.timeout = timeout or config.get('timeout', 10)
-                self.type_safety = config.get('type_safety', True)
                 self.data_sources = config.get('data_sources', ['tencent', 'sina'])
                 self.cache_enabled = config.get('cache_enabled', True)
                 self.cache_ttl = config.get('cache_ttl', 300)
                 
-                # 获取Sina配置
-                sina_config = config.get('sina', {})
-                self.sina_base_url = sina_config.get('base_url', "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData")
-                self.sina_params = sina_config.get('params', {})
+                # 新浪配置
+                sina_cfg = config.get('sina', {})
+                self.sina_base_url = sina_cfg.get('base_url', "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData")
                 
-                # 获取Tencent配置
-                tencent_config = config.get('tencent', {})
-                self.tencent_enabled = tencent_config.get('enabled', True)
-                self.tencent_weekly_url = tencent_config.get('weekly_url', "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get")
-                self.tencent_params = tencent_config.get('params', {})
-                
-                logger.info("配置模块加载成功")
-                
+                # 腾讯配置
+                tencent_cfg = config.get('tencent', {})
+                self.tencent_enabled = tencent_cfg.get('enabled', True)
+                self.tencent_weekly_url = tencent_cfg.get('weekly_url', "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get")
             except Exception as e:
-                logger.warning(f"配置加载失败，使用默认配置: {str(e)}")
+                logger.warning(f"配置加载失败，使用默认值: {str(e)}")
                 self._set_default_config()
         else:
             self._set_default_config()
-            logger.info("使用默认配置初始化")
         
-        # 初始化缓存系统
+        # 缓存初始化
         self.cache = {}
         self.cache_timestamps = {}
-        
-        # 功能完整性检查
-        self._feature_check()
-        
-        logger.info(f"数据获取器初始化完成 - 支持功能: {self._get_feature_summary()}")
+        logger.info("数据获取器初始化完成")
     
     def _set_default_config(self):
-        """设置默认配置"""
+        """默认配置"""
         self.max_retries = 3
         self.timeout = 10
-        self.type_safety = True
         self.data_sources = ['tencent', 'sina']
         self.cache_enabled = True
         self.cache_ttl = 300
         
-        # Sina默认配置
         self.sina_base_url = "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
-        self.sina_params = {
-            'weekly': {'scale': 'week', 'ma': 'no', 'datalen': '500'},
-            'daily': {'scale': '240', 'ma': 'no', 'datalen': '1000'},
-            'minute': {'scale': '5', 'ma': 'no', 'datalen': '10000'}
-        }
-        
-        # Tencent默认配置
         self.tencent_enabled = True
         self.tencent_weekly_url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-        self.tencent_params = {
-            'weekly': {'_var': 'kline_week', 'param': '{symbol},week,,,320,qfq'}
-        }
-    
-    def _feature_check(self):
-        """功能完整性检查"""
-        required_features = [
-            'get_weekly_data', 'get_daily_data', 'get_realtime_data', 'get_minute_data',
-            'health_check', 'cache_system', 'error_handling', 'data_validation'
-        ]
-        
-        implemented_features = []
-        
-        # 检查核心数据获取功能
-        if hasattr(self, 'get_weekly_data') and callable(getattr(self, 'get_weekly_data')):
-            implemented_features.append('get_weekly_data')
-        
-        if hasattr(self, 'get_daily_data') and callable(getattr(self, 'get_daily_data')):
-            implemented_features.append('get_daily_data')
-        
-        if hasattr(self, 'get_realtime_data') and callable(getattr(self, 'get_realtime_data')):
-            implemented_features.append('get_realtime_data')
-        
-        # 检查分钟数据功能
-        if hasattr(self, 'get_minute_data') and callable(getattr(self, 'get_minute_data')):
-            implemented_features.append('get_minute_data')
-        
-        # 检查系统功能
-        if hasattr(self, 'health_check') and callable(getattr(self, 'health_check')):
-            implemented_features.append('health_check')
-        
-        if hasattr(self, '_get_from_cache') and hasattr(self, '_save_to_cache'):
-            implemented_features.append('cache_system')
-        
-        if hasattr(self, '_request_with_retry'):
-            implemented_features.append('error_handling')
-        
-        if hasattr(self, '_validate_symbol') and hasattr(self, '_validate_dates'):
-            implemented_features.append('data_validation')
-        
-        # 记录检查结果
-        missing_features = set(required_features) - set(implemented_features)
-        
-        if missing_features:
-            logger.warning(f"缺失功能: {missing_features}")
-        else:
-            logger.info("所有核心功能已完整实现")
-    
-    def _get_feature_summary(self):
-        """获取功能摘要"""
-        features = []
-        
-        if 'tencent' in self.data_sources:
-            features.append('腾讯数据源')
-        if 'sina' in self.data_sources:
-            features.append('新浪数据源')
-        
-        if self.cache_enabled:
-            features.append('缓存系统')
-        
-        features.extend(['周线数据', '日线数据', '实时数据', '分钟数据', '健康检查'])
-        
-        return ', '.join(features)
     
     def _convert_date_format(self, date_str: str) -> str:
-        """
-        日期格式转换
-        :param date_str: 日期字符串
-        :return: YYYYMMDD格式的日期字符串
-        """
+        """日期格式统一为YYYYMMDD"""
         if not date_str or not isinstance(date_str, str):
             return date_str
-            
-        # 移除破折号
-        if '-' in date_str:
-            date_str = date_str.replace('-', '')
-        
-        # 如果已经是YYYYMMDD格式，直接返回
-        if len(date_str) == 8 and date_str.isdigit():
-            return date_str
-            
-        return date_str
-    
-    def _format_symbol(self, symbol: str) -> str:
-        """
-        格式化股票代码 - 增强错误处理
-        :param symbol: 股票代码
-        :return: 标准化后的股票代码（纯数字）
-        """
-        try:
-            if not isinstance(symbol, str):
-                symbol = str(symbol)
-            
-            # 验证股票代码格式
-            pattern = r'^([A-Za-z]{2})?(\d{6})(\.[A-Za-z]{2})?$'
-            match = re.match(pattern, symbol)
-            if not match:
-                logger.warning(f"无效股票代码格式: {symbol}")
-                return symbol  # 返回原始值，不中断流程
-            
-            # 提取数字部分
-            digit_part = match.group(2)
-            
-            # 返回纯数字代码
-            return digit_part
-            
-        except Exception as e:
-            logger.warning(f"股票代码格式化失败: {symbol}, 错误: {str(e)}")
-            return symbol  # 返回原始值，不中断流程
+        return date_str.replace('-', '') if '-' in date_str else date_str
     
     def _validate_symbol(self, symbol: str) -> str:
-        """
-        验证和标准化股票代码 - 防御性修复：增强类型和长度检查
-        :param symbol: 股票代码
-        :return: 标准化后的股票代码（纯数字）
-        """
-        try:
-            # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 防御性修复：检查symbol类型，防止DataFrame等无效类型
-            if symbol is None:
-                raise DataFetchError("股票代码不能为None")
-            
-            # 检查是否为DataFrame或其他复杂对象（通过字符串表示长度判断）
-            symbol_str = str(symbol)
-            if len(symbol_str) > 100:  # 正常股票代码不会超过20字符，100以上可能是DataFrame
-                logger.error(f"疑似DataFrame被当作股票代码传递: {symbol_str[:100]}...")
-                raise DataFetchError(f"无效股票代码类型: 疑似DataFrame对象")
-            
-            # 检查是否为Pandas Series或DataFrame的字符串表示特征
-            if any(marker in symbol_str for marker in ['DataFrame', 'Series', 'open', 'high', 'low', 'close', 'volume', 'date']):
-                logger.error(f"检测到DataFrame特征在股票代码中: {symbol_str[:200]}")
-                raise DataFetchError(f"无效股票代码: 检测到DataFrame特征")
-            
-            formatted_symbol = self._format_symbol(symbol)
-            
-            # 验证是否为6位数字
-            if not re.match(r'^\d{6}$', formatted_symbol):
-                raise DataFetchError(f"无效股票代码格式: {symbol} (期望6位数字，得到: {formatted_symbol})")
-            
-            return formatted_symbol
-            
-        except DataFetchError:
-            raise  # 重新抛出已知错误
-        except Exception as e:
-            logger.error(f"股票代码验证异常: {str(e)}")
-            raise DataFetchError(f"股票代码验证失败: {symbol}")
+        """验证股票代码（支持6位数字A股代码和字母代码如TQQQ）"""
+        if symbol is None:
+            raise DataFetchError("股票代码不能为空")
+        
+        symbol_str = str(symbol)
+        # 防止传入DataFrame等无效类型
+        if len(symbol_str) > 100 or any(marker in symbol_str for marker in ['DataFrame', 'Series', 'open', 'close']):
+            raise DataFetchError(f"无效股票代码类型: {symbol_str[:50]}...")
+        
+        # 对于纯数字代码，验证是否为6位数字（A股代码）
+        if symbol_str.isdigit():
+            if not re.match(r'^\d{6}$', symbol_str):
+                raise DataFetchError(f"A股股票代码必须是6位数字: {symbol}")
+            return symbol_str
+        
+        # 对于包含字母的代码（如TQQQ），直接返回原始代码
+        # 去除可能的前缀如sh/sz，确保返回干净的代码
+        return symbol_str.replace('sh', '').replace('sz', '')
     
     def _get_market_prefix(self, symbol: str) -> str:
-        """
-        获取市场前缀 - 增强错误处理
-        :param symbol: 纯数字股票代码
-        :return: 市场前缀 ('sh' or 'sz')
-        """
-        try:
-            if symbol.startswith("6") or symbol.startswith("5") or symbol.startswith("9"):
-                return "sh"
-            elif symbol.startswith("0") or symbol.startswith("3") or symbol.startswith("1"):
-                return "sz"
-            else:
-                logger.warning(f"无法识别的股票代码前缀: {symbol}")
-                return "sh"  # 默认返回上海市场
-                
-        except Exception as e:
-            logger.error(f"获取市场前缀异常: {str(e)}")
-            return "sh"  # 默认返回上海市场
+        """获取市场前缀（sh/sz/美股特殊处理）"""
+        # 如果是纯数字代码，使用原来的逻辑（A股）
+        if symbol.isdigit():
+            return "sh" if symbol.startswith(("6", "5", "9")) else "sz"
+        # 对于非数字代码（如TQQQ），暂时返回空字符串，后续在fetch方法中特殊处理
+        return ""
     
-    def _validate_dates(self, start_date: Optional[str], end_date: Optional[str]) -> tuple:
-        """
-        验证和标准化日期范围 - 增强错误处理和日志记录
-        :param start_date: 开始日期
-        :param end_date: 结束日期
-        :return: (start_dt, end_dt, original_start, original_end)
-        """
+    def _parse_datetime(self, date_str: str) -> datetime:
+        """解析多种日期时间格式"""
+        for fmt in ["%Y%m%d", "%Y-%m-%d", "%Y%m%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        raise ValueError(f"无法解析日期格式: {date_str}")
+    
+    def _validate_dates(self, start_date: Optional[str], end_date: Optional[str], 
+                        need_time: bool = False) -> Tuple[datetime, datetime, Optional[str], Optional[str]]:
+        """验证日期范围，支持带时间的格式"""
+        original_start, original_end = start_date, end_date
+        
+        # 处理默认值
+        now = datetime.now()
+        end_date = end_date if end_date else (now.strftime("%Y-%m-%d %H:%M:%S") if need_time else now.strftime("%Y%m%d"))
+        start_timedelta = timedelta(days=365) if not need_time else timedelta(days=7)
+        start_date = start_date if start_date else ((now - start_timedelta).strftime("%Y-%m-%d %H:%M:%S") 
+                                                  if need_time else (now - start_timedelta).strftime("%Y%m%d"))
+        
+        # 解析日期
         try:
-            # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 增强日志：记录原始日期参数
-            logger.debug(f"日期验证输入 - start_date: {start_date}, end_date: {end_date}")
+            start_dt = self._parse_datetime(start_date)
+            end_dt = self._parse_datetime(end_date)
             
-            # 记录原始参数
-            original_start = start_date
-            original_end = end_date
-            
-            # 转换日期格式
-            if end_date:
-                end_date = self._convert_date_format(end_date)
-                logger.debug(f"转换后end_date: {end_date}")
-            else:
-                end_date = datetime.now().strftime("%Y%m%d")
-                logger.debug(f"使用默认end_date: {end_date}")
-                
-            if start_date:
-                start_date = self._convert_date_format(start_date)
-                logger.debug(f"转换后start_date: {start_date}")
-            else:
-                # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 修复：使用用户提供的end_date来计算start_date，而不是当前时间
-                if end_date:
-                    end_dt_temp = datetime.strptime(end_date, "%Y%m%d")
-                    start_date = (end_dt_temp - timedelta(days=365)).strftime("%Y%m%d")
-                else:
-                    start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-                logger.debug(f"使用计算start_date: {start_date}")
-            
-            start_dt = datetime.strptime(start_date, "%Y%m%d")
-            end_dt = datetime.strptime(end_date, "%Y%m%d")
-            
-            # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 增强日志：记录最终日期范围
-            date_range_days = (end_dt - start_dt).days
-            logger.info(f"日期范围验证: {start_dt.strftime('%Y-%m-%d')} 至 {end_dt.strftime('%Y-%m-%d')} (共{date_range_days}天)")
-            
-            if start_dt > end_dt:
-                raise DataFetchError(f"开始日期 {start_date} 不能晚于结束日期 {end_date}")
-                
-            return start_dt, end_dt, original_start, original_end
-            
-        except ValueError as e:
-            logger.error(f"日期格式错误: {str(e)}")
-            raise DataFetchError("日期格式错误，请使用YYYYMMDD或YYYY-MM-DD格式")
-        except Exception as e:
-            logger.error(f"日期验证异常: {str(e)}")
-            raise DataFetchError(f"日期验证失败: {start_date} - {end_date}")
+            # 如果不需要时间信息，将开始时间设为00:00:00，结束时间设为23:59:59
+            if not need_time:
+                start_dt = start_dt.replace(hour=0, minute=0, second=0)
+                end_dt = end_dt.replace(hour=23, minute=59, second=59)
+        except ValueError:
+            raise DataFetchError(f"日期格式错误，支持格式: YYYYMMDD, YYYY-MM-DD, {'YYYY-MM-DD HH:MM:SS' if need_time else ''}")
+        
+        if start_dt > end_dt:
+            raise DataFetchError(f"开始日期{start_date}不能晚于结束日期{end_date}")
+        return start_dt, end_dt, original_start, original_end
     
     def _get_cache_key(self, data_type: str, symbol: str, start_date: str, end_date: str) -> str:
-        """
-        生成缓存键 - 增强错误处理
-        :param data_type: 数据类型
-        :param symbol: 股票代码
-        :param start_date: 开始日期
-        :param end_date: 结束日期
-        :return: 缓存键
-        """
-        try:
-            return f"{data_type}:{symbol}:{start_date}:{end_date}"
-        except Exception as e:
-            logger.error(f"生成缓存键异常: {str(e)}")
-            return f"error:{int(time.time())}"
+        """生成缓存键"""
+        return f"{data_type}:{symbol}:{start_date}:{end_date}"
     
     def _get_from_cache(self, cache_key: str) -> Optional[pd.DataFrame]:
-        """
-        从缓存获取数据 - 增强错误处理
-        :param cache_key: 缓存键
-        :return: 数据DataFrame或None
-        """
-        try:
-            if not self.cache_enabled:
-                return None
-            
-            # 检查缓存是否存在且未过期
-            if cache_key in self.cache:
-                if cache_key in self.cache_timestamps:
-                    timestamp = self.cache_timestamps[cache_key]
-                    if time.time() - timestamp < self.cache_ttl:
-                        return self.cache[cache_key].copy()
-                    else:
-                        # 缓存过期，删除
-                        del self.cache[cache_key]
-                        del self.cache_timestamps[cache_key]
-            
+        """从缓存获取数据"""
+        if not self.cache_enabled or cache_key not in self.cache:
             return None
-            
-        except Exception as e:
-            logger.error(f"从缓存获取数据异常: {str(e)}")
+        
+        if time.time() - self.cache_timestamps.get(cache_key, 0) < self.cache_ttl:
+            return self.cache[cache_key].copy()
+        else:
+            # 缓存过期清理
+            del self.cache[cache_key]
+            del self.cache_timestamps[cache_key]
             return None
     
     def _save_to_cache(self, cache_key: str, data: pd.DataFrame):
-        """
-        保存数据到缓存 - 增强错误处理
-        :param cache_key: 缓存键
-        :param data: 数据DataFrame
-        """
-        try:
-            if self.cache_enabled:
-                self.cache[cache_key] = data.copy()
-                self.cache_timestamps[cache_key] = time.time()
-        except Exception as e:
-            logger.error(f"保存数据到缓存异常: {str(e)}")
+        """保存数据到缓存"""
+        if self.cache_enabled:
+            self.cache[cache_key] = data.copy()
+            self.cache_timestamps[cache_key] = time.time()
     
-    def _request_with_retry(self, request_func, *args, **kwargs):
-        """
-        带重试的请求包装器 - 增强错误处理
-        :param request_func: 请求函数
-        :return: 请求结果
-        """
+    def _request_with_retry(self, url: str, params: dict = None, headers: dict = None) -> Optional[requests.Response]:
+        """带重试的HTTP请求"""
+        headers = headers or {}
+        headers.setdefault('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        
         for attempt in range(1, self.max_retries + 1):
             try:
                 if attempt > 1:
                     time.sleep(random.uniform(0.5, 2.0))
                 
-                result = request_func(*args, **kwargs)
-                if result is not None:
-                    return result
-                    
+                response = self.http_client(url, params=params, headers=headers, timeout=self.timeout)
+                if response.status_code == 200:
+                    return response
+                logger.warning(f"请求失败，状态码: {response.status_code}")
             except Exception as e:
                 if attempt == self.max_retries:
-                    logger.error(f"所有重试尝试失败: {str(e)}")
-                    return None
+                    logger.error(f"所有重试失败: {str(e)}")
                 else:
-                    logger.warning(f"尝试 {attempt} 失败: {str(e)}")
-        
+                    logger.warning(f"第{attempt}次请求失败: {str(e)}")
         return None
     
-    def _safe_dataframe_operation(self, df: pd.DataFrame, operation: str, **kwargs) -> pd.DataFrame:
-        """
-        安全的DataFrame操作 - 新增：增强错误处理
-        :param df: DataFrame
-        :param operation: 操作类型 ('rename', 'convert_dtypes', 'add_column')
-        :return: 处理后的DataFrame或空DataFrame
-        """
-        try:
-            if df is None or df.empty:
-                return pd.DataFrame()
-            
-            if operation == 'rename':
-                column_map = kwargs.get('column_map', {})
-                return df.rename(columns=column_map)
-                
-            elif operation == 'convert_dtypes':
-                date_col = kwargs.get('date_col', 'date')
-                numeric_cols = kwargs.get('numeric_cols', [])
-                
-                if date_col in df.columns:
-                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                
-                for col in numeric_cols:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                
-                return df
-                
-            elif operation == 'add_column':
-                column_name = kwargs.get('column_name')
-                column_value = kwargs.get('column_value')
-                
-                if column_name:
-                    df[column_name] = column_value
-                
-                return df
-                
-            else:
-                return df
-                
-        except Exception as e:
-            logger.warning(f"DataFrame操作失败: {operation}, 错误: {str(e)}")
-            return pd.DataFrame()
-    
-    def _check_date_range_completeness(self, df: pd.DataFrame, start_dt: datetime, end_dt: datetime, symbol: str, data_type: str):
-        """
-        检查日期范围完整性 - 新增：确保实际数据范围覆盖请求范围
-        :param df: 数据DataFrame
-        :param start_dt: 请求开始日期
-        :param end_dt: 请求结束日期
-        :param symbol: 股票代码
-        :param data_type: 数据类型
-        """
-        if df.empty or 'date' not in df.columns:
-            return
-            
-        # 获取实际数据日期范围
-        actual_start = df['date'].min()
-        actual_end = df['date'].max()
+    def _safe_dataframe_process(self, df: pd.DataFrame, date_col: str = 'date', numeric_cols: List[str] = None) -> pd.DataFrame:
+        """安全处理DataFrame（类型转换+列重命名）"""
+        if df.empty:
+            return df
         
-        # 检查日期范围完整性
-        if actual_start > start_dt or actual_end < end_dt:
-            logger.warning(
-                f"数据日期范围不完整: {symbol} {data_type}\n"
-                f"请求范围: {start_dt.strftime('%Y-%m-%d')} 至 {end_dt.strftime('%Y-%m-%d')}\n"
-                f"实际范围: {actual_start.strftime('%Y-%m-%d')} 至 {actual_end.strftime('%Y-%m-%d')}\n"
-                f"缺失数据: {self._get_missing_date_range(start_dt, end_dt, actual_start, actual_end)}"
-            )
-    
-    def _get_missing_date_range(self, start_dt: datetime, end_dt: datetime, 
-                               actual_start: datetime, actual_end: datetime) -> str:
-        """
-        获取缺失的日期范围描述
-        """
-        missing_parts = []
+        numeric_cols = numeric_cols or ['open', 'close', 'high', 'low', 'volume']
         
-        if actual_start > start_dt:
-            missing_parts.append(f"开始部分: {start_dt.strftime('%Y-%m-%d')} 至 {actual_start.strftime('%Y-%m-%d')}")
+        # 先重命名day列为date（确保date列存在后再进行转换）
+        if 'day' in df.columns and 'date' not in df.columns:
+            df.rename(columns={'day': 'date'}, inplace=True)
         
-        if actual_end < end_dt:
-            missing_parts.append(f"结束部分: {actual_end.strftime('%Y-%m-%d')} 至 {end_dt.strftime('%Y-%m-%d')}")
+        # 处理日期时间转换，支持多种格式
+        if date_col in df.columns:
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce', infer_datetime_format=True)
         
-        return "; ".join(missing_parts) if missing_parts else "无缺失数据"
-    
-    def clean_symbol_format(self, symbol: str) -> str:
-        """
-        清洗股票代码格式 - 移除市场前缀
-        :param symbol: 股票代码
-        :return: 纯数字股票代码
-        """
-        try:
-            if not isinstance(symbol, str):
-                symbol = str(symbol)
-            
-            # 移除市场前缀
-            if symbol.startswith(('sh', 'sz')):
-                return symbol[2:]  # 移除前2字符
-            return symbol
-            
-        except Exception as e:
-            logger.warning(f"股票代码清洗失败: {symbol}, 错误: {str(e)}")
-            return symbol
+        # 数值转换
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        return df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
     
     def get_weekly_data(self, symbol: str, start_date: Optional[str] = None, 
-                        end_date: Optional[str] = None) -> pd.DataFrame:
-        """
-        获取周线数据 - 增强错误处理和日期日志
-        :param symbol: 股票代码
-        :param start_date: 开始日期
-        :param end_date: 结束日期
-        :return: 周线数据DataFrame
-        """
+                        end_date: Optional[str] = None) -> Tuple[pd.DataFrame, Optional[str], Optional[str]]:
+        """获取周线数据（核心接口）"""
         try:
-            # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 增强日志：记录方法调用参数
-            logger.info(f"获取周线数据 - 符号: {symbol}, 开始: {start_date}, 结束: {end_date}")
-            
-            # 验证和标准化
             symbol = self._validate_symbol(symbol)
-            start_dt, end_dt, original_start, original_end = self._validate_dates(start_date, end_date)
+            start_dt, end_dt, orig_start, orig_end = self._validate_dates(start_date, end_date)
+            market = self._get_market_prefix(symbol)
+            full_symbol = f"{market}{symbol}"
             
-            # 检查缓存
-            cache_start = original_start if original_start else start_dt.strftime("%Y%m%d")
-            cache_end = original_end if original_end else end_dt.strftime("%Y%m%d")
+            # 缓存检查
+            cache_start = orig_start or start_dt.strftime('%Y-%m-%d')
+            cache_end = orig_end or end_dt.strftime('%Y-%m-%d')
             cache_key = self._get_cache_key('weekly', symbol, cache_start, cache_end)
-            
             cached_data = self._get_from_cache(cache_key)
             if cached_data is not None:
-                # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 新增：记录缓存数据的日期范围
-                if not cached_data.empty and 'date' in cached_data.columns:
-                    cache_start_date = cached_data['date'].min().strftime('%Y-%m-%d')
-                    cache_end_date = cached_data['date'].max().strftime('%Y-%m-%d')
-                    cache_days = (cached_data['date'].max() - cached_data['date'].min()).days
-                    logger.info(f"缓存数据日期范围: {cache_start_date} 至 {cache_end_date} (共{cache_days}天)")
-                
-                logger.info(f"从缓存获取周线数据: {symbol}")
-                return cached_data
+                actual_start = cached_data['date'].min().strftime('%Y-%m-%d') if not cached_data.empty else None
+                actual_end = cached_data['date'].max().strftime('%Y-%m-%d') if not cached_data.empty else None
+                return (cached_data, actual_start, actual_end)
             
-            # 根据纯数字代码确定市场前缀
-            market = self._get_market_prefix(symbol)
-            full_symbol = f"{market}{symbol}"  # 用于请求的代码
-            
-            # 按优先级尝试各个数据源
+            # 尝试数据源
             for source in self.data_sources:
                 try:
-                    if source == 'tencent':
-                        df = self._get_tencent_weekly_data(symbol, start_dt, end_dt, full_symbol)
+                    if source == 'tencent' and self.tencent_enabled:
+                        df = self._fetch_tencent_weekly(full_symbol, start_dt, end_dt)
                     elif source == 'sina':
-                        df = self._get_sina_weekly_data(symbol, start_dt, end_dt, full_symbol)
+                        df = self._fetch_sina_weekly(full_symbol, start_dt, end_dt)
                     else:
                         continue
                     
-                    # 使用安全的DataFrame检查
-                    if df is not None and not df.empty:
-                        # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 新增：记录实际获取数据的日期范围
-                        if 'date' in df.columns:
-                            actual_start = df['date'].min().strftime('%Y-%m-%d')
-                            actual_end = df['date'].max().strftime('%Y-%m-%d')
-                            actual_days = (df['date'].max() - df['date'].min()).days
-                            logger.info(f"数据源返回的实际日期范围: {actual_start} 至 {actual_end} (共{actual_days}天)")
+                    if not df.empty:
+                        # 日期过滤
+                        df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+                        if df.empty:
+                            continue
                         
-                        # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 新增：检查日期范围完整性
-                        self._check_date_range_completeness(df, start_dt, end_dt, symbol, 'weekly')
-                        
+                        # 缓存并返回
                         self._save_to_cache(cache_key, df)
-                        logger.info(f"成功从 {source} 获取周线数据: {len(df)} 条")
-                        return df
-                        
+                        actual_start = df['date'].min().strftime('%Y-%m-%d')
+                        actual_end = df['date'].max().strftime('%Y-%m-%d')
+                        logger.info(f"从{source}获取周线数据: {symbol} ({actual_start}~{actual_end})")
+                        return (df, actual_start, actual_end)
                 except Exception as e:
-                    logger.warning(f"数据源 {source} 失败: {str(e)}")
+                    logger.warning(f"{source}数据源失败: {str(e)}")
                     continue
             
-            logger.error("所有周线数据获取方式均失败")
-            return pd.DataFrame()
-            
+            logger.error("所有数据源均失败")
+            return (pd.DataFrame(), None, None)
         except DataFetchError as e:
-            logger.error(f"获取周线数据参数错误: {str(e)}")
-            return pd.DataFrame()
+            logger.error(f"参数错误: {str(e)}")
+            return (pd.DataFrame(), None, None)
         except Exception as e:
             logger.error(f"获取周线数据异常: {str(e)}")
-            return pd.DataFrame()
+            return (pd.DataFrame(), None, None)
     
-    def _get_tencent_weekly_data(self, symbol: str, start_dt: datetime, 
-                                end_dt: datetime, full_symbol: str) -> pd.DataFrame:
-        """
-        获取腾讯财经周线数据 - 增强错误处理
-        """
+    def _fetch_tencent_weekly(self, full_symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+        """腾讯周线数据获取"""
+        params = {
+            "_var": "kline_week",
+            "param": f"{full_symbol},week,{start_dt.strftime('%Y-%m-%d')},{end_dt.strftime('%Y-%m-%d')},500,qfq",
+            "r": f"0.{int(time.time()*1000)}"
+        }
+        
+        response = self._request_with_retry(self.tencent_weekly_url, params=params)
+        if not response:
+            logger.warning(f"腾讯请求失败，无响应: {full_symbol}")
+            return pd.DataFrame()
+        
+        content = response.text.strip().lstrip('kline_week=').rstrip(';')
         try:
-            if not self.tencent_enabled:
+            data = json.loads(content)
+            if data.get('code') != 0:
+                logger.warning(f"腾讯返回错误代码: {data.get('code')}, 消息: {data.get('msg')}")
                 return pd.DataFrame()
             
-            timestamp = int(time.time() * 1000)
-            param_str = f"{full_symbol},week,{start_dt.strftime('%Y-%m-%d')},{end_dt.strftime('%Y-%m-%d')},500,qfq"
-            params = {
-                "_var": self.tencent_params['weekly']['_var'],
-                "param": param_str,
-                "r": f"0.{timestamp}"
-            }
+            if full_symbol not in data.get('data', {}):
+                logger.warning(f"腾讯返回数据中不存在 {full_symbol}")
+                return pd.DataFrame()
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://gu.qq.com/'
-            }
+            weekly_data = data['data'][full_symbol].get('qfqweek') or data['data'][full_symbol].get('week')
+            if not weekly_data or not isinstance(weekly_data, list) or len(weekly_data) == 0:
+                logger.warning(f"腾讯返回空数据或格式错误: {full_symbol}")
+                return pd.DataFrame()
             
-            def fetch_func():
+            # 尝试创建DataFrame，直接捕获可能的列数不匹配错误
+            try:
+                # 优先尝试6列格式
+                df = pd.DataFrame(weekly_data, columns=['date', 'open', 'close', 'high', 'low', 'volume'])
+                logger.debug(f"腾讯数据使用6列格式解析成功: {full_symbol}")
+            except ValueError:
                 try:
-                    response = requests.get(self.tencent_weekly_url, params=params, 
-                                          headers=headers, timeout=self.timeout)
-                    if response.status_code != 200:
-                        return pd.DataFrame()
-                    
-                    content = response.text.strip()
-                    if not content:
-                        return pd.DataFrame()
-                    
-                    # 修复JSON解析逻辑
-                    json_str = content
-                    if content.startswith('kline_week='):
-                        json_str = content[11:]
-                    
-                    if json_str.endswith(';'):
-                        json_str = json_str[:-1]
-                    
-                    data = json.loads(json_str)
-                    
-                    # 腾讯接口返回的数据结构验证
-                    if 'data' not in data or 'code' not in data:
-                        return pd.DataFrame()
-                    
-                    if data.get('code') != 0:
-                        return pd.DataFrame()
-                    
-                    stock_data = data.get('data', {})
-                    if full_symbol not in stock_data:
-                        return pd.DataFrame()
-                    
-                    symbol_data = stock_data[full_symbol]
-                    
-                    # 查找周线数据键
-                    weekly_keys = ['qfqweek', 'week', 'qfqWeek', 'Week']
-                    weekly_data = None
-                    
-                    for key in weekly_keys:
-                        if key in symbol_data:
-                            weekly_data = symbol_data[key]
-                            break
-                    
-                    if not weekly_data:
-                        return pd.DataFrame()
-                    
-                    # 转换为DataFrame
-                    columns = ['date', 'open', 'close', 'high', 'low', 'volume']
-                    df = pd.DataFrame(weekly_data, columns=columns)
-                    
-                    # 使用安全的DataFrame操作
-                    df = self._safe_dataframe_operation(df, 'convert_dtypes', 
-                                                       date_col='date',
-                                                       numeric_cols=['open', 'close', 'high', 'low', 'volume'])
-                    
-                    df = self._safe_dataframe_operation(df, 'add_column', 
-                                                       column_name='symbol', column_value=full_symbol)
-                    
-                    # 过滤日期范围
-                    if not df.empty and 'date' in df.columns:
-                        df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
-                    
-                    return df
-                    
-                except Exception as e:
-                    logger.warning(f"腾讯数据请求异常: {str(e)}")
+                    # 如果6列失败，尝试7列格式
+                    df = pd.DataFrame(weekly_data, columns=['date', 'open', 'high', 'low', 'close', 'volume', 'extra'])
+                    # 只保留需要的列
+                    df = df[['date', 'open', 'close', 'high', 'low', 'volume']]
+                    logger.debug(f"腾讯数据使用7列格式解析成功: {full_symbol}")
+                except Exception as inner_e:
+                    logger.error(f"腾讯数据创建DataFrame失败: {str(inner_e)}")
                     return pd.DataFrame()
             
-            result = self._request_with_retry(fetch_func)
-            return result if result is not None else pd.DataFrame()
-            
+            # 安全处理数据框
+            return self._safe_dataframe_process(df)
+        except json.JSONDecodeError as json_e:
+            logger.error(f"腾讯数据JSON解析失败: {str(json_e)}, 内容: {content[:100]}...")
+            return pd.DataFrame()
         except Exception as e:
-            logger.error(f"获取腾讯周线数据异常: {str(e)}")
+            logger.error(f"腾讯数据处理异常: {str(e)}")
             return pd.DataFrame()
     
-    def _get_sina_weekly_data(self, symbol: str, start_dt: datetime, 
-                             end_dt: datetime, full_symbol: str) -> pd.DataFrame:
-        """
-        获取新浪周线数据 - 增强错误处理
-        """
-        try:
-            # 尝试不同的scale值获取周线数据
-            scale_options = ["240", "60", "30", "15", "week"]
+    def _fetch_sina_weekly(self, full_symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+        """新浪周线数据获取（兼容scale=week/7）"""
+        for scale in ["week", "7"]:
+            params = {"symbol": full_symbol, "scale": scale, "ma": "no", "datalen": "500"}
+            response = self._request_with_retry(self.sina_base_url, params=params)
+            if not response:
+                continue
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'http://finance.sina.com.cn/'
-            }
+            content = response.text.strip()
+            if not content or content == "null":
+                continue
             
-            def fetch_func():
-                for scale_val in scale_options:
-                    params = {
-                        "symbol": full_symbol,
-                        "scale": scale_val,
-                        "ma": "no",
-                        "datalen": "500"
-                    }
-                    
-                    try:
-                        response = requests.get(self.sina_base_url, params=params, 
-                                              headers=headers, timeout=self.timeout)
-                        if response.status_code != 200:
-                            continue
-                        
-                        content = response.text.strip()
-                        if not content or content == "null":
-                            continue
-                        
-                        data = json.loads(content)
-                        if not data or not isinstance(data, list):
-                            continue
-                        
-                        # 转换为DataFrame
-                        df = pd.DataFrame(data)
-                        
-                        # 安全重命名列
-                        column_map = {
-                            "day": "date",
-                            "open": "open",
-                            "high": "high",
-                            "low": "low",
-                            "close": "close",
-                            "volume": "volume"
-                        }
-                        df = self._safe_dataframe_operation(df, 'rename', column_map=column_map)
-                        
-                        # 安全转换数据类型
-                        df = self._safe_dataframe_operation(df, 'convert_dtypes',
-                                                           date_col='date',
-                                                           numeric_cols=['open', 'close', 'high', 'low', 'volume'])
-                        
-                        df = self._safe_dataframe_operation(df, 'add_column',
-                                                           column_name='symbol', column_value=full_symbol)
-                        
-                        # 安全过滤日期范围
-                        if not df.empty and 'date' in df.columns:
-                            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
-                        
-                        if not df.empty:
-                            return df
-                            
-                    except Exception as e:
-                        continue
-                
-                return pd.DataFrame()
-            
-            result = self._request_with_retry(fetch_func)
-            return result if result is not None else pd.DataFrame()
-            
-        except Exception as e:
-            logger.error(f"获取新浪周线数据异常: {str(e)}")
-            return pd.DataFrame()
+            try:
+                data = json.loads(content)
+                if not isinstance(data, list):
+                    continue
+                df = pd.DataFrame(data)
+                df = self._safe_dataframe_process(df)
+                if not df.empty:
+                    return df
+            except Exception as e:
+                logger.warning(f"新浪周线数据解析失败: {str(e)}")
+                continue
+        return pd.DataFrame()
     
     def get_daily_data(self, symbol: str, start_date: Optional[str] = None, 
                       end_date: Optional[str] = None) -> pd.DataFrame:
-        """
-        获取日线数据 - 增强错误处理和日期日志
-        :param symbol: 股票代码
-        :param start_date: 开始日期
-        :param end_date: 结束日期
-        :return: 日线数据DataFrame
-        """
+        """获取日线数据"""
         try:
-            # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 增强日志：记录方法调用参数
-            logger.info(f"获取日线数据 - 符号: {symbol}, 开始: {start_date}, 结束: {end_date}")
-            
             symbol = self._validate_symbol(symbol)
-            start_dt, end_dt, original_start, original_end = self._validate_dates(start_date, end_date)
+            start_dt, end_dt, _, _ = self._validate_dates(start_date, end_date)
+            full_symbol = f"{self._get_market_prefix(symbol)}{symbol}"
             
-            cache_key = self._get_cache_key('daily', symbol, 
-                                           start_dt.strftime("%Y%m%d"), 
-                                           end_dt.strftime("%Y%m%d"))
+            # 缓存检查
+            cache_key = self._get_cache_key('daily', symbol, start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d"))
             cached_data = self._get_from_cache(cache_key)
             if cached_data is not None:
-                logger.info(f"从缓存获取日线数据: {symbol}")
                 return cached_data
             
-            # 根据纯数字代码确定市场前缀
-            market = self._get_market_prefix(symbol)
-            full_symbol = f"{market}{symbol}"  # 用于请求的代码
+            # 新浪接口请求
+            params = {"symbol": full_symbol, "scale": "240", "ma": "no", "datalen": "1000"}
+            response = self._request_with_retry(self.sina_base_url, params=params)
+            if not response:
+                return pd.DataFrame()
             
-            params = {
-                "symbol": full_symbol,
-                "scale": "240",
-                "ma": "no",
-                "datalen": "1000"
-            }
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'http://finance.sina.com.cn/'
-            }
-            
-            def fetch_func():
-                try:
-                    response = requests.get(self.sina_base_url, params=params, 
-                                          headers=headers, timeout=self.timeout)
-                    if response.status_code != 200:
-                        return pd.DataFrame()
-                    
-                    content = response.text.strip()
-                    if not content or content == "null":
-                        return pd.DataFrame()
-                    
-                    data = json.loads(content)
-                    if not data or not isinstance(data, list):
-                        return pd.DataFrame()
-                    
-                    # 转换为DataFrame
-                    df = pd.DataFrame(data)
-                    
-                    # 安全重命名列
-                    column_map = {
-                        "day": "date",
-                        "open": "open",
-                        "high": "high",
-                        "low": "low",
-                        "close": "close",
-                        "volume": "volume"
-                    }
-                    df = self._safe_dataframe_operation(df, 'rename', column_map=column_map)
-                    
-                    # 安全转换数据类型
-                    df = self._safe_dataframe_operation(df, 'convert_dtypes',
-                                                       date_col='date',
-                                                       numeric_cols=['open', 'close', 'high', 'low', 'volume'])
-                    
-                    df = self._safe_dataframe_operation(df, 'add_column',
-                                                       column_name='symbol', column_value=full_symbol)
-                    
-                    # 安全过滤日期范围
-                    if not df.empty and 'date' in df.columns:
-                        df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
-                    
-                    return df
-                    
-                except Exception as e:
-                    return pd.DataFrame()
-            
-            result = self._request_with_retry(fetch_func)
-            if result is not None and not result.empty:
-                # 🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧🔧 新增：检查日期范围完整性
-                self._check_date_range_completeness(result, start_dt, end_dt, symbol, 'daily')
+            # 数据处理
+            try:
+                data = json.loads(response.text.strip())
+            except json.JSONDecodeError as e:
+                logger.error(f"日线数据JSON解析失败: {str(e)}")
+                return pd.DataFrame()
                 
-                self._save_to_cache(cache_key, result)
-                logger.info(f"成功获取日线数据: {len(result)} 条")
-                return result
+            if not isinstance(data, list):
+                return pd.DataFrame()
             
-            return pd.DataFrame()
+            df = pd.DataFrame(data)
+            df = self._safe_dataframe_process(df)
+            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
             
+            if not df.empty:
+                self._save_to_cache(cache_key, df)
+            return df
         except Exception as e:
             logger.error(f"获取日线数据异常: {str(e)}")
             return pd.DataFrame()
     
-    def get_realtime_data(self, symbol: str) -> Dict:
-        """
-        获取实时数据 - 增强错误处理
-        :param symbol: 股票代码
-        :return: 实时数据字典
-        """
+    def get_hourly_data(self, symbol: str, start_date: Optional[str] = None, 
+                       end_date: Optional[str] = None) -> pd.DataFrame:
+        """获取小时线数据（scale=60）"""
         try:
             symbol = self._validate_symbol(symbol)
+            # 小时线需要时间信息，所以need_time=True
+            start_dt, end_dt, _, _ = self._validate_dates(start_date, end_date, need_time=True)
+            full_symbol = f"{self._get_market_prefix(symbol)}{symbol}"
             
-            # 根据纯数字代码确定市场前缀
-            market = self._get_market_prefix(symbol)
-            full_symbol = f"{market}{symbol}"  # 用于请求的代码
+            # 缓存检查
+            cache_key = self._get_cache_key('hourly', symbol, 
+                                           start_dt.strftime("%Y%m%d%H%M"), 
+                                           end_dt.strftime("%Y%m%d%H%M"))
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
             
-            url = f"https://qt.gtimg.cn/q={full_symbol}"
+            # 新浪接口请求（60分钟=小时线）
+            params = {"symbol": full_symbol, "scale": "60", "ma": "no", "datalen": "1000"}
+            response = self._request_with_retry(self.sina_base_url, params=params)
+            if not response:
+                return pd.DataFrame()
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://gu.qq.com/'
+            # 数据处理
+            try:
+                data = json.loads(response.text.strip())
+            except json.JSONDecodeError as e:
+                logger.error(f"小时线数据JSON解析失败: {str(e)}")
+                return pd.DataFrame()
+                
+            if not isinstance(data, list):
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(data)
+            df = self._safe_dataframe_process(df)
+            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+            
+            if not df.empty:
+                self._save_to_cache(cache_key, df)
+                logger.info(f"获取小时线数据: {symbol} ({len(df)}条)")
+            return df
+        except Exception as e:
+            logger.error(f"获取小时线数据异常: {str(e)}")
+            return pd.DataFrame()
+    
+    def get_minute_data(self, symbol: str, start_date: Optional[str] = None, 
+                       end_date: Optional[str] = None, interval: int = 5) -> pd.DataFrame:
+        """获取分钟数据（5/15/30分钟）"""
+        try:
+            valid_intervals = [5, 15, 30]
+            if interval not in valid_intervals:
+                raise DataFetchError(f"支持的分钟间隔: {valid_intervals}")
+            
+            symbol = self._validate_symbol(symbol)
+            # 分钟线需要时间信息，所以need_time=True
+            start_dt, end_dt, _, _ = self._validate_dates(start_date, end_date, need_time=True)
+            full_symbol = f"{self._get_market_prefix(symbol)}{symbol}"
+            
+            # 缓存检查
+            cache_key = self._get_cache_key(f"minute_{interval}", symbol, 
+                                           start_dt.strftime("%Y%m%d%H%M"), 
+                                           end_dt.strftime("%Y%m%d%H%M"))
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
+            
+            # 新浪接口请求
+            params = {"symbol": full_symbol, "scale": str(interval), "ma": "no", "datalen": "10000"}
+            response = self._request_with_retry(self.sina_base_url, params=params)
+            if not response:
+                return pd.DataFrame()
+            
+            # 数据处理
+            try:
+                data = json.loads(response.text.strip())
+            except json.JSONDecodeError as e:
+                logger.error(f"分钟线数据JSON解析失败: {str(e)}")
+                return pd.DataFrame()
+                
+            if not isinstance(data, list):
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(data)
+            df = self._safe_dataframe_process(df)
+            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+            df['interval'] = interval
+            
+            if not df.empty:
+                self._save_to_cache(cache_key, df)
+            return df
+        except DataFetchError as e:
+            logger.error(f"参数错误: {str(e)}")
+        except Exception as e:
+            logger.error(f"获取分钟数据异常: {str(e)}")
+        return pd.DataFrame()
+    
+    def get_realtime_data(self, symbol: str) -> Dict[str, Any]:
+        """获取实时数据"""
+        try:
+            symbol = self._validate_symbol(symbol)
+            full_symbol = f"{self._get_market_prefix(symbol)}{symbol}"
+            url = f"http://hq.sinajs.cn/list={full_symbol}"
+            
+            # 缓存检查
+            cache_key = f"realtime:{full_symbol}"
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data:
+                return cached_data
+            
+            # 请求实时数据
+            response = self._request_with_retry(url)
+            if not response:
+                return {}
+            
+            # 解析新浪实时行情格式
+            content = response.text.strip()
+            match = re.match(r'var hq_str_[\w\d]+="([^"]+)"', content)
+            if not match:
+                return {}
+            
+            data_list = match.group(1).split(',')
+            if len(data_list) < 32:
+                return {}
+            
+            # 构造返回结果
+            realtime_data = {
+                'symbol': full_symbol, 'name': data_list[0],
+                'open': float(data_list[1]) if data_list[1] else None,
+                'pre_close': float(data_list[2]) if data_list[2] else None,
+                'price': float(data_list[3]) if data_list[3] else None,
+                'high': float(data_list[4]) if data_list[4] else None,
+                'low': float(data_list[5]) if data_list[5] else None,
+                'volume': float(data_list[8]) if data_list[8] else None,
+                'amount': float(data_list[9]) if data_list[9] else None,
+                'date': data_list[30], 'time': data_list[31],
+                'timestamp': datetime.now().timestamp()
             }
             
-            def fetch_func():
-                try:
-                    response = requests.get(url, headers=headers, timeout=self.timeout)
-                    if response.status_code != 200:
-                        return {}
-                    
-                    content = response.text.strip()
-                    if not content:
-                        return {}
-                    
-                    # 解析腾讯财经实时数据格式
-                    if '~' not in content:
-                        return {}
-                    
-                    parts = content.split('~')
-                    if len(parts) < 40:
-                        return {}
-                    
-                    # 提取关键字段
-                    data = {
-                        'name': parts[1],
-                        'code': parts[2],
-                        'price': parts[3],
-                        'prev_close': parts[4],
-                        'open': parts[5],
-                        'volume': parts[6],
-                        'amount': parts[37] if len(parts) > 37 else '0',
-                        'high': parts[33] if len(parts) > 33 else '0',
-                        'low': parts[34] if len(parts) > 34 else '0',
-                        'time': parts[30] if len(parts) > 30 else ''
-                    }
-                    
-                    # 安全转换数值类型
-                    for key in ['price', 'prev_close', 'open', 'volume', 'amount', 'high', 'low']:
-                        try:
-                            data[key] = float(data[key])
-                        except (ValueError, TypeError):
-                            data[key] = 0.0
-                    
-                    return data
-                except Exception as e:
-                    logger.warning(f"实时数据请求异常: {str(e)}")
-                    return {}
-            
-            return self._request_with_retry(fetch_func) or {}
-            
+            # 实时数据缓存30秒
+            self.cache[cache_key] = realtime_data
+            self.cache_timestamps[cache_key] = time.time()
+            return realtime_data
         except Exception as e:
             logger.error(f"获取实时数据异常: {str(e)}")
             return {}
     
-    def get_minute_data(self, symbol: str, interval: str = '5m', days: int = 30) -> pd.DataFrame:
-        """
-        获取分钟数据 - 模拟实现，基于日线数据生成
-        :param symbol: 股票代码
-        :param interval: 时间间隔，如'5m'
-        :param days: 天数
-        :return: 分钟数据DataFrame
-        """
+    def health_check(self) -> Dict[str, Any]:
+        """健康检查"""
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'status': 'healthy',
+            'sources': {},
+            'errors': []
+        }
+        
+        # 测试新浪
         try:
-            # 模拟实现：获取日线数据，然后生成分钟数据
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-            daily_data = self.get_daily_data(symbol, start_date, end_date)
-            if daily_data.empty:
-                return pd.DataFrame()
-            
-            # 生成分钟数据：每个交易日生成240个分钟点（模拟）
-            minute_data = []
-            for _, row in daily_data.iterrows():
-                date = row['date']
-                # 确保date是datetime对象
-                if isinstance(date, str):
-                    date = pd.to_datetime(date)
-                for i in range(240):  # 假设交易日有4小时，240分钟
-                    minute_time = date + timedelta(minutes=i)
-                    # 模拟价格波动，基于日线OHLC
-                    progress = i / 239.0
-                    minute_open = row['open'] + (row['close'] - row['open']) * progress
-                    minute_high = row['high']  # 简化
-                    minute_low = row['low']    # 简化
-                    minute_close = minute_open  # 简化
-                    minute_volume = row['volume'] / 240  # 平均分配
-                    minute_data.append({
-                        'date': minute_time,
-                        'open': minute_open,
-                        'high': minute_high,
-                        'low': minute_low,
-                        'close': minute_close,
-                        'volume': minute_volume
-                    })
-            df = pd.DataFrame(minute_data)
-            df = self._safe_dataframe_operation(df, 'add_column', column_name='symbol', column_value=symbol)
-            return df
+            response = self._request_with_retry(self.sina_base_url, params={'symbol': 'sh600000', 'scale': '5', 'ma': 'no', 'datalen': '10'})
+            result['sources']['sina'] = 'healthy' if response else 'unhealthy'
         except Exception as e:
-            logger.error(f"获取分钟数据异常: {str(e)}")
-            return pd.DataFrame()
-    
-    def health_check(self) -> Dict:
-        """
-        健康检查 - 增强错误处理
-        :return: 系统状态字典
-        """
-        try:
-            status_info = {
-                "status": "OK",
-                "version": "2.1.1",
-                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "data_sources": self.data_sources,
-                "cache_enabled": self.cache_enabled,
-                "cache_size": len(self.cache),
-                "features": self._get_feature_summary()
-            }
-            
-            # 测试数据获取功能
+            result['sources']['sina'] = 'unhealthy'
+            result['errors'].append(f"sina: {str(e)}")
+        
+        # 测试腾讯
+        if self.tencent_enabled:
             try:
-                test_symbol = "000001"  # 纯数字代码
-                test_data = self.get_realtime_data(test_symbol)
-                if test_data:
-                    status_info["realtime_test"] = "PASS"
-                else:
-                    status_info["realtime_test"] = "FAIL"
-            except:
-                status_info["realtime_test"] = "FAIL"
-            
-            return status_info
-            
-        except Exception as e:
-            logger.error(f"健康检查异常: {str(e)}")
-            return {
-                "status": "ERROR",
-                "error": str(e),
-                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
+                params = {"_var": "kline_day", "param": "sh600000,day,,,10,qfq", "r": f"0.{int(time.time()*1000)}"}
+                response = self._request_with_retry(self.tencent_weekly_url, params=params)
+                result['sources']['tencent'] = 'healthy' if response else 'unhealthy'
+            except Exception as e:
+                result['sources']['tencent'] = 'unhealthy'
+                result['errors'].append(f"tencent: {str(e)}")
+        
+        # 状态判断
+        if any(s == 'unhealthy' for s in result['sources'].values()) or result['errors']:
+            result['status'] = 'degraded' if result['sources'] else 'unhealthy'
+        return result
 
-# 向后兼容性别名
-StockDataAPI = StockDataFetcher
 
-# 功能完整性测试
-def test_feature_completeness():
-    """测试所有功能模块是否完整实现"""
-    print("=== 功能完整性检查 ===")
-    
-    fetcher = StockDataFetcher()
-    
-    # 测试1: 健康检查
-    print("1. 健康检查...")
-    health = fetcher.health_check()
-    print(f"   状态: {health['status']}")
-    print(f"   版本: {health['version']}")
-    print(f"   功能: {health['features']}")
-    
-    # 测试2: 实时数据获取
-    print("2. 实时数据获取...")
-    realtime_data = fetcher.get_realtime_data("000001")  # 纯数字代码
-    if realtime_data:
-        print(f"   成功获取实时数据: {realtime_data.get('name', 'N/A')}")
-    else:
-        print("   实时数据获取失败")
-    
-    # 测试3: 日线数据获取
-    print("3. 日线数据获取...")
-    daily_data = fetcher.get_daily_data("000001", "2023-10-01", "2023-10-10")
-    if not daily_data.empty:
-        print(f"   成功获取日线数据: {len(daily_data)} 条")
-    else:
-        print("   日线数据获取失败")
-    
-    # 测试4: 周线数据获取
-    print("4. 周线数据获取...")
-    weekly_data = fetcher.get_weekly_data("000001", "2023-01-01", "2023-10-01")
-    if not weekly_data.empty:
-        print(f"   成功获取周线数据: {len(weekly_data)} 条")
-    else:
-        print("   周线数据获取失败")
-    
-    # 测试5: 分钟数据获取
-    print("5. 分钟数据获取...")
-    minute_data = fetcher.get_minute_data("000001", "5m", 30)
-    if not minute_data.empty:
-        print(f"   成功获取分钟数据: {len(minute_data)} 条")
-    else:
-        print("   分钟数据获取失败")
-    
-    # 测试6: 缓存功能
-    print("6. 缓存功能测试...")
-    if fetcher.cache_enabled:
-        print("   缓存功能已启用")
-    else:
-        print("   缓存功能未启用")
-    
-    print("=== 检查完成 ===")
+# ------------------------------ 精简单元测试 ------------------------------
+import unittest
 
-if __name__ == "__main__":
-    # 运行功能完整性测试
-    test_feature_completeness()
+class TestStockDataFetcher(unittest.TestCase):
+    """核心功能单元测试（精简版）"""
     
-    # 详细功能演示
-    print("\n=== 详细功能演示 ===")
-    fetcher = StockDataFetcher()
+    def setUp(self):
+        """初始化测试环境"""
+        self.mock_http = Mock()
+        self.mock_response = Mock(status_code=200)
+        self.mock_http.return_value = self.mock_response
+        self.fetcher = StockDataFetcher(max_retries=1, timeout=5, http_client=self.mock_http)
+        self.fetcher.cache_enabled = False  # 禁用缓存便于测试
     
-    # 演示周线数据获取
-    symbol = "000001"  # 纯数字代码
-    weekly_data = fetcher.get_weekly_data(symbol, "2023-01-01", "2023-10-01")
+    def test_symbol_validation(self):
+        """测试股票代码验证"""
+        # 有效代码
+        valid_symbols = ['600000', 'sh600000', '000001', '300001']
+        for s in valid_symbols:
+            self.assertEqual(len(self.fetcher._validate_symbol(s)), 6)
+        
+        # 无效代码
+        invalid_symbols = ['12345', 'sh6000', None, pd.DataFrame(), 'abc123']
+        for s in invalid_symbols:
+            with self.assertRaises(DataFetchError):
+                self.fetcher._validate_symbol(s)
     
-    if not weekly_data.empty:
-        print(f"成功获取 {symbol} 周线数据:")
-        print(f"数据范围: {weekly_data['date'].min()} 至 {weekly_data['date'].max()}")
-        print(f"数据列: {list(weekly_data.columns)}")
-        print(weekly_data.head())
-    else:
-        print("周线数据获取失败")
+    def test_date_validation(self):
+        """测试日期验证"""
+        # 有效日期
+        start, end, _, _ = self.fetcher._validate_dates('2023-01-01', '2024-01-01')
+        self.assertLessEqual(start, end)
+        
+        # 带时间的日期验证
+        start, end, _, _ = self.fetcher._validate_dates('2023-01-01 09:30', '2023-01-01 15:00', need_time=True)
+        self.assertLessEqual(start, end)
+        
+        # 无效日期
+        with self.assertRaises(DataFetchError):
+            self.fetcher._validate_dates('20240101', '20230101')  # 开始>结束
+        with self.assertRaises(DataFetchError):
+            self.fetcher._validate_dates('20231301', '20240101')  # 无效月份
     
-    # 演示实时数据
-    realtime_data = fetcher.get_realtime_data(symbol)
-    if realtime_data:
-        print(f"\n{realtime_data.get('name', symbol)} 实时数据:")
-        for key, value in realtime_data.items():
-            print(f"  {key}: {value}")
+    def test_weekly_data_fetch(self):
+        """测试周线数据获取"""
+        mock_data = [{"day": "2023-10-09", "open": "10.0", "high": "10.5", "low": "9.8", "close": "10.2", "volume": "1000000"}]
+        self.mock_response.text = json.dumps(mock_data)
+        
+        df, start, end = self.fetcher.get_weekly_data('600000', '20231001', '20231030')
+        self.assertFalse(df.empty)
+        self.assertEqual(start, '2023-10-09')
+        self.assertEqual(end, '2023-10-09')
     
-    # 演示分钟数据
-    minute_data = fetcher.get_minute_data(symbol, "5m", 1)  # 1天的分钟数据
-    if not minute_data.empty:
-        print(f"\n成功获取 {symbol} 分钟数据:")
-        print(f"数据点数: {len(minute_data)}")
-        print(minute_data.head())
-    else:
-        print("分钟数据获取失败")
+    def test_hourly_data_fetch(self):
+        """测试小时线数据获取"""
+        mock_data = [{"day": "2023-10-09 10:30:00", "open": "10.0", "close": "10.2", "high": "10.3", "low": "9.9", "volume": "500000"}]
+        self.mock_response.text = json.dumps(mock_data)
+        
+        df = self.fetcher.get_hourly_data('600000', '2023-10-09 09:00', '2023-10-09 15:00')
+        self.assertFalse(df.empty)
+        self.assertEqual(df.iloc[0]['date'].strftime('%Y-%m-%d %H:%M'), '2023-10-09 10:30')
+    
+    def test_cache_functionality(self):
+        """测试缓存功能"""
+        self.fetcher.cache_enabled = True
+        test_df = pd.DataFrame({'date': [pd.Timestamp('2023-01-01')], 'open': [10.0]})
+        cache_key = self.fetcher._get_cache_key('test', '600000', '20230101', '20230101')
+        
+        # 保存缓存
+        self.fetcher._save_to_cache(cache_key, test_df)
+        # 获取缓存
+        cached_df = self.fetcher._get_from_cache(cache_key)
+        self.assertFalse(cached_df.empty)
+    
+    def test_health_check(self):
+        """测试健康检查"""
+        result = self.fetcher.health_check()
+        self.assertIn('status', result)
+        self.assertIn('sources', result)
+
+if __name__ == '__main__':
+    unittest.main(argv=[''], exit=False, verbosity=1)

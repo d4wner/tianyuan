@@ -206,7 +206,9 @@ system:
   
   # 回测配置
   backtest:
-    initial_capital: 100000
+    # 初始资金配置 - 用户可直接修改此数值来调整回测起始资金
+    # 单位：元 - 示例：600000 表示60万元
+    initial_capital: 600000
     commission: 0.0003
     slippage: 0.0001
     risk_free_rate: 0.03

@@ -1,0 +1,14 @@
+# 每日盘前准备 (9:00 AM)
+0 9 * * 1-5 cd /Users/pingan/tools/trade/tianyuan && /Users/pingan/tools/trade/tianyuan/chanlun_env/bin/python src/main.py --mode pre_market >> logs/system.log 2>&1
+
+# 盘中监控 (9:30 AM - 2:50 PM，每10分钟执行)
+*/10 9-14 * * 1-5 cd /Users/pingan/tools/trade/tianyuan && /Users/pingan/tools/trade/tianyuan/chanlun_env/bin/python src/main.py --mode monitor >> logs/system.log 2>&1
+
+# 盘后分析 (3:30 PM)
+30 15 * * 1-5 cd /Users/pingan/tools/trade/tianyuan && /Users/pingan/tools/trade/tianyuan/chanlun_env/bin/python src/main.py --mode post_market >> logs/system.log 2>&1
+
+# 单次扫描 (8:00 PM)
+0 20 * * 1-5 cd /Users/pingan/tools/trade/tianyuan && /Users/pingan/tools/trade/tianyuan/chanlun_env/bin/python src/main.py --mode scan_once >> logs/system.log 2>&1
+
+# 每周数据清理 (周六凌晨3点)
+0 3 * * 6 cd /Users/pingan/tools/trade/tianyuan && /Users/pingan/tools/trade/tianyuan/chanlun_env/bin/python src/main.py --clean_cache >> logs/system.log 2>&1
