@@ -169,18 +169,31 @@ class DingdingNotifier:
         # 获取ETF名称
         etf_name = self.etf_names.get(symbol, symbol)
         
-        # 计算操作数量
-        quantity = int(self.position_units * signal_details.get('position_size', 0.5))
+        # 计算操作数量和金额
+        position_size = signal_details.get('position_size', 0.5)
+        quantity = int(self.position_units * position_size)
+        price = signal_details.get('price', 0)
+        # 计算交易金额
+        amount = quantity * price
         
-        # 构建消息 - 简化格式
+        # 获取缠论级别和信号详情
+        chanlun_level = signal_details.get('chanlun_level', '未指定')
+        signal_detail = signal_details.get('signal_detail', '缠论分析')
+        # 如果有周线确认信息，添加到描述中
+        weekly_confirmed = signal_details.get('weekly_confirmed', False)
+        confirmation_text = "[周线确认] " if weekly_confirmed else ""
+        
+        # 构建消息 - 包含交易金额和详细缠论信号
         return (
             f"交易信号: {symbol} ({etf_name})\n"
             f"时间: {signal_details.get('time', datetime.now().strftime('%H:%M:%S'))}\n"
-            f"操作: {signal_details.get('signal_type', '未知').upper()} {quantity}股\n"
+            f"操作: {signal_details.get('signal_type', '未知').upper()}\n"
             f"价格: {signal_details.get('price', '未知')}\n"
+            f"交易金额: ¥{amount:.2f}\n"
             f"目标: {signal_details.get('target_price', '未知')}\n"
             f"止损: {signal_details.get('stoploss', '未知')}\n"
-            f"原因: {signal_details.get('strategy', '缠论分析')}\n"
+            f"缠论级别: {chanlun_level}\n"
+            f"原因: {confirmation_text}{signal_detail}\n"
             f"置信度: {signal_details.get('confidence', 0)*100:.1f}%\n"
             f"有效期: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         )

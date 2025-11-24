@@ -1,0 +1,11 @@
+{
+  "sh512660": {
+    "success": true,
+    "return_percent": 30.217601428201093,
+    "data": null,
+    "final_capital": 781305.6085692066,
+    "max_drawdown": 15.8510534268967,
+    "trade_count": 1,
+    "win_rate": 0.0
+  }
+}

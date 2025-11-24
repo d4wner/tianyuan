@@ -351,12 +351,14 @@ class BacktestEngine:
             
             # 根据时间级别获取数据（修改部分：接收实际日期范围）
             if timeframe == 'daily':
-                # 改为接收三元组返回值
-                data, actual_start, actual_end = self.data_api.get_daily_data(
+                # 修复：get_daily_data只返回DataFrame，自己计算实际日期范围
+                data = self.data_api.get_daily_data(
                     symbol=symbol,
                     start_date=start_date,
                     end_date=end_date
                 )
+                actual_start = data['date'].min().strftime('%Y-%m-%d') if not data.empty else start_date
+                actual_end = data['date'].max().strftime('%Y-%m-%d') if not data.empty else end_date
             elif timeframe == 'weekly':
                 # 改为接收三元组返回值
                 data, actual_start, actual_end = self.data_api.get_weekly_data(
