@@ -364,16 +364,127 @@ def filter_data_by_date(data: List[Dict], start_date: str, end_date: str,
 def get_last_trading_day() -> datetime:
     """
     获取上一个交易日
+    通过API获取最新行情数据来判断真实的交易日，而不仅仅是排除周末
     :return: 上一个交易日的日期对象
     """
+    # 尝试导入requests库，如果不可用则直接使用备用逻辑
+    try:
+        import requests
+        import re
+        
+        # 尝试通过新浪API获取上证指数的最新行情
+        try:
+            # 上证指数代码
+            symbol = "sh000001"
+            url = f"http://hq.sinajs.cn/list={symbol}"
+            
+            # 发送请求
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            
+            # 解析响应内容
+            content = response.text.strip()
+            match = re.match(r'var hq_str_[\w\d]+\="([^"]+)"', content)
+            
+            if match:
+                data_list = match.group(1).split(',')
+                if len(data_list) >= 3:  # 保证有足够的数据
+                    # 获取最新交易日期（通过检查当天是否有交易来确定）
+                    today = datetime.today().date()
+                    
+                    # 检查最近的10个非周末日期
+                    days_checked = 0
+                    max_days_to_check = 10
+                    
+                    while days_checked < max_days_to_check:
+                        # 从昨天开始往前检查
+                        for i in range(1, max_days_to_check + 1):
+                            check_date = today - timedelta(days=i)
+                            days_checked += 1
+                            
+                            # 跳过周末
+                            if check_date.weekday() >= 5:
+                                continue
+                            
+                            # 尝试获取该日期的行情数据来验证是否为交易日
+                            try:
+                                date_str = check_date.strftime('%Y%m%d')
+                                # 使用新浪历史行情API
+                                history_url = f"http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?symbol={symbol}&date={date_str}"
+                                history_response = requests.get(history_url, timeout=3)
+                                
+                                # 验证响应是否有效
+                                if history_response.status_code == 200:
+                                    # 检查返回内容是否包含有效的JSON数据
+                                    response_text = history_response.text.strip()
+                                    # 有效的交易日数据通常会包含股票信息，长度不会太短
+                                    if len(response_text) > 10 and ("{" in response_text or "[" in response_text):
+                                        logger.info(f"通过API验证，最近的交易日是: {check_date}")
+                                        return datetime.combine(check_date, datetime.min.time())
+                            except Exception as inner_e:
+                                logger.debug(f"检查日期 {check_date} 时出错: {inner_e}")
+                                continue
+        except Exception as e:
+            logger.warning(f"获取最新交易日时API调用失败: {e}，使用备用逻辑")
+    except ImportError:
+        logger.warning("requests库不可用，使用备用逻辑判断交易日")
+    
+    # 备用逻辑：考虑周末和部分常见节假日
     today = datetime.today()
-    # 简单逻辑：如果今天是周末，返回上周五；否则返回昨天
+    
+    # 定义一些常见的中国股市节假日（每年需要更新）
+    # 这里只列出部分主要节假日作为示例
+    holidays_2025 = [
+        datetime(2025, 1, 1).date(),    # 元旦
+        datetime(2025, 1, 29).date(),   # 春节
+        datetime(2025, 1, 30).date(),
+        datetime(2025, 1, 31).date(),
+        datetime(2025, 2, 1).date(),
+        datetime(2025, 2, 2).date(),
+        datetime(2025, 2, 3).date(),
+        datetime(2025, 2, 4).date(),
+        datetime(2025, 4, 29).date(),   # 劳动节
+        datetime(2025, 4, 30).date(),
+        datetime(2025, 5, 1).date(),
+        datetime(2025, 6, 2).date(),    # 端午节
+        datetime(2025, 9, 8).date(),    # 中秋节
+        datetime(2025, 10, 1).date(),   # 国庆节
+        datetime(2025, 10, 2).date(),
+        datetime(2025, 10, 3).date(),
+        datetime(2025, 10, 4).date(),
+        datetime(2025, 10, 5).date(),
+        datetime(2025, 10, 6).date(),
+        datetime(2025, 10, 7).date(),
+    ]
+    
+    # 从昨天开始往前查找
+    for i in range(1, 15):  # 最多查找15天
+        check_date = today - timedelta(days=i)
+        check_date_only = check_date.date()
+        
+        # 跳过周末
+        if check_date_only.weekday() >= 5:
+            continue
+        
+        # 跳过已知节假日
+        if check_date_only in holidays_2025:
+            logger.debug(f"跳过已知节假日: {check_date_only}")
+            continue
+        
+        # 找到第一个非周末非节假日的日期
+        logger.info(f"使用备用逻辑确定的最近交易日: {check_date_only}")
+        return check_date
+    
+    # 如果以上方法都失败，使用最基本的逻辑
     if today.weekday() == 0:  # 周一
-        return today - timedelta(days=3)
+        result = today - timedelta(days=3)
     elif today.weekday() >= 5:  # 周六或周日
-        return today - timedelta(days=today.weekday() - 4)
+        result = today - timedelta(days=today.weekday() - 4)
     else:  # 周二至周五
-        return today - timedelta(days=1)
+        result = today - timedelta(days=1)
+    
+    logger.warning(f"使用最基本逻辑，估计的最近交易日是: {result.date()}")
+    return result
 
 def is_trading_hour() -> bool:
     """
