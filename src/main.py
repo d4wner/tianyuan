@@ -146,7 +146,7 @@ def evaluate_market_status(api, calculator, symbols: List[str]) -> Dict[str, Any
         try:
             # 获取日线数据（30天）
             start_date, end_date = get_valid_date_range_str(30)
-            df = api.get_daily_data(symbol, start_date=start_date, end_date=end_date)
+            df = api.get_daily_data(symbol, start_date=start_date, end_date=end_date, force_refresh=True)
             
             if df.empty:
                 logger.warning(f"股票 {symbol} 获取数据为空")
@@ -249,6 +249,14 @@ def calculate_signal_strength(result_df: pd.DataFrame) -> int:
         else:
             strength += 5  # 在中枢内略微偏多
     
+    # 修复：添加对背驰的强度调整
+    # 支持多种背驰标记格式
+    divergence = latest.get('divergence', '')
+    if divergence in ['bull', 'bullish', 'bottom']:
+        strength += 20  # 底背驰增加信号强度
+    elif divergence in ['bear', 'bearish', 'top']:
+        strength -= 20  # 顶背驰减少信号强度
+    
     return max(0, min(100, strength))  # 限制在0-100范围内
 
 def validate_date_format(date_str: str, format: str = "%Y%m%d") -> bool:
@@ -320,7 +328,7 @@ def run_scan_once_mode(config: Dict[str, Any], symbols: List[str], plot: bool = 
             
             # 获取日线数据
             start_date, end_date = get_valid_date_range_str(180)  # 半年数据
-            df = api.get_daily_data(symbol, start_date=start_date, end_date=end_date)
+            df = api.get_daily_data(symbol, start_date=start_date, end_date=end_date, force_refresh=True)
             
             if df.empty:
                 logger.warning(f"股票 {symbol} 日线数据为空")

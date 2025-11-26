@@ -171,20 +171,70 @@ class ChanlunMonitor:
     
     def calculate_position_size(self, symbol, signal_type):
         """
-        计算仓位大小 - 修复版
+        计算仓位大小 - 修复版，增加周线级别顶底背驰的仓位管理策略
         :param symbol: 股票代码
         :param signal_type: 信号类型
         :return: 仓位比例
         """
-        # 根据信号类型确定仓位比例
-        if signal_type == 'first_buy' or signal_type == 'black_swan_buy':  # 修复：正确条件判断
-            return [0.1, 0.15]
-        elif signal_type == 'second_buy':
-            return [0.4, 0.5]
-        elif signal_type == 'third_buy':
-            return [0.2, 0.25]
-        else:
-            return [0.3]  # 默认仓位
+        try:
+            # 默认仓位设置
+            if signal_type == 'first_buy' or signal_type == 'black_swan_buy':
+                base_position = [0.1, 0.15]
+            elif signal_type == 'second_buy':
+                base_position = [0.4, 0.5]
+            elif signal_type == 'third_buy':
+                base_position = [0.2, 0.25]
+            else:
+                base_position = [0.3]  # 默认仓位
+            
+            # 检查是否是买入信号
+            if 'buy' in signal_type.lower():
+                # 获取周线数据
+                end_date = datetime.now().strftime('%Y%m%d')
+                start_date = (datetime.now() - timedelta(days=90)).strftime('%Y%m%d')  # 获取90天周线数据
+                weekly_df = self.api.get_weekly_data(symbol, start_date=start_date, end_date=end_date)
+                
+                if not weekly_df.empty:
+                    # 创建缠论计算器并计算周线指标
+                    weekly_calculator = ChanlunCalculator()
+                    weekly_result = weekly_calculator.calculate_chanlun(weekly_df)
+                    
+                    # 检查周线级别是否有背驰
+                    weekly_has_divergence = False
+                    if not weekly_result.empty:
+                        latest_weekly = weekly_result.iloc[-1]
+                        weekly_has_divergence = 'divergence' in latest_weekly and \
+                                              latest_weekly['divergence'] in ['bull', 'bullish', 'bottom', 'bear', 'bearish', 'top']
+                    
+                    # 如果周线级别没有背驰，则降低仓位为原来的1/4
+                    if not weekly_has_divergence:
+                        # 检查日线级别是否有背驰（仅在周线没有背驰的情况下才检查）
+                        daily_df = self.api.get_daily_data(symbol, start_date=start_date, end_date=end_date, force_refresh=True)
+                        if not daily_df.empty:
+                            daily_calculator = ChanlunCalculator()
+                            daily_result = daily_calculator.calculate_chanlun(daily_df)
+                            
+                            if not daily_result.empty:
+                                latest_daily = daily_result.iloc[-1]
+                                daily_has_divergence = 'divergence' in latest_daily and \
+                                                      latest_daily['divergence'] in ['bull', 'bullish', 'bottom', 'bear', 'bearish', 'top']
+                                
+                                # 如果只有日线级别有背驰，降低仓位为原来的1/4
+                                if daily_has_divergence:
+                                    logger.info(f"{symbol} 仅日线级别有背驰，仓位调整为原来的1/4")
+                                    # 将仓位范围缩小为原来的1/4
+                                    adjusted_position = []
+                                    for p in base_position:
+                                        adjusted_position.append(p / 4)
+                                    return adjusted_position
+            
+            # 默认返回原始仓位（如果周线有背驰或计算失败）
+            return base_position
+            
+        except Exception as e:
+            logger.warning(f"计算周线背驰调整仓位失败: {str(e)}")
+            # 发生异常时返回默认仓位
+            return [0.2]  # 返回保守的默认仓位
     
     def check_black_swan_conditions(self, data):
         """
@@ -230,6 +280,35 @@ class ChanlunMonitor:
                 "target_price": 0,
                 "stoploss": 0
             }
+        
+        # 优先检查market_condition中是否包含明确的买入信号，特别是多级别联立信号
+        if market_condition and ('multi_timeframe_buy' in market_condition or 'buy' in market_condition):
+            # 获取最新价格
+            current_price = data.iloc[-1]['close']
+            
+            # 初始化信号
+            signal = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": symbol,
+                "market_condition": market_condition,
+                "price": current_price,
+                "target_price": current_price * 1.05,
+                "stoploss": current_price * 0.97,
+                "reason": market_condition,
+                "action": "buy",
+                "signal_type": "multi_timeframe" if 'multi_timeframe_buy' in market_condition else "normal",
+                "strength": 85 if 'multi_timeframe_buy' in market_condition else 70,
+                "position_size": [0.3, 0.4] if 'multi_timeframe_buy' in market_condition else self.calculate_position_size(symbol, market_condition),
+                "valid_until": (datetime.now() + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            logger.info(f"{symbol} 触发市场条件信号: {market_condition}")
+            return signal
+        
+        # 然后尝试识别复合信号
+        composite_signal = self.identify_composite_signals(data, symbol)
+        if composite_signal['action'] != 'hold':
+            return composite_signal
             
         # 获取最新价格
         current_price = data.iloc[-1]['close']
@@ -263,6 +342,159 @@ class ChanlunMonitor:
         else:
             signal["action"] = "hold"
             signal["reason"] = "no_clear_signal"
+        
+        return signal
+    
+    def identify_composite_signals(self, data, symbol):
+        """
+        识别复合信号
+        :param data: 股票数据
+        :param symbol: 股票代码
+        :return: 复合信号字典
+        """
+        try:
+            # 获取当前价格
+            current_price = data.iloc[-1]['close']
+            
+            # 初始化信号
+            signal = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": symbol,
+                "action": "hold",
+                "reason": "no_composite_signal",
+                "price": current_price,
+                "target_price": current_price * 1.05,
+                "stoploss": current_price * 0.97,
+                "signal_type": "normal",
+                "strength": 50,
+                "valid_until": (datetime.now() + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            # 1. 检查日线级别二买 + 分钟级别底背驰复合信号
+            daily_df = self.api.get_daily_data(symbol, days=60, force_refresh=True)
+            if not daily_df.empty:
+                # 使用self.calculator而不是创建新实例，确保配置一致性
+                daily_result = self.calculator.calculate_chanlun(daily_df)
+                
+                if not daily_result.empty:
+                    latest_daily = daily_result.iloc[-1]
+                    
+                    # 检查日线二买条件
+                    is_second_buy = latest_daily.get('buy_signal') == 'second_buy'
+                    
+                    if is_second_buy:
+                        # 获取15分钟数据检查底背驰
+                        minute_15m_df = self.api.get_minute_data(symbol, period='15m', days=5)
+                        if not minute_15m_df.empty:
+                            # 设置15分钟参数
+                            self.calculator.set_timeframe_params('15m', {
+                                'fractal_sensitivity': self.config.get('chanlun', {}).get('minute_15_fractal_sensitivity', 2),
+                                'pen_min_length': self.config.get('chanlun', {}).get('minute_15_pen_min_length', 3),
+                                'central_min_length': self.config.get('chanlun', {}).get('minute_15_central_min_length', 3)
+                            })
+                            minute_result = self.calculator.calculate_chanlun(minute_15m_df)
+                            
+                            if not minute_result.empty:
+                                latest_minute = minute_result.iloc[-1]
+                                
+                                # 检查分钟级别底背驰
+                                has_bottom_divergence = 'divergence' in latest_minute and \
+                                                      latest_minute['divergence'] in ['bull', 'bullish', 'bottom']
+                                
+                                if has_bottom_divergence:
+                                    signal.update({
+                                        "action": "buy",
+                                        "reason": "daily_second_buy_plus_minute_divergence",
+                                        "signal_type": "daily_second_buy_minute_divergence",
+                                        "strength": 85,  # 高信号强度
+                                        "position_size": [0.3, 0.4]  # 较大仓位
+                                    })
+                                    logger.info(f"{symbol} 触发复合信号: 日线二买+分钟级别底背驰")
+                                    self.save_signal(signal)  # 保存信号
+                                    return signal
+            
+            # 2. 检查周线底分型 + 日线突破中枢复合信号
+            weekly_df = self.api.get_weekly_data(symbol, days=120)
+            if not weekly_df.empty:
+                # 设置周线参数
+                self.calculator.set_timeframe_params('weekly', {
+                    'fractal_sensitivity': self.config.get('chanlun', {}).get('weekly_fractal_sensitivity', 2),
+                    'pen_min_length': self.config.get('chanlun', {}).get('weekly_pen_min_length', 3),
+                    'central_min_length': self.config.get('chanlun', {}).get('weekly_central_min_length', 3)
+                })
+                weekly_result = self.calculator.calculate_chanlun(weekly_df)
+                
+                if not weekly_result.empty:
+                    latest_weekly = weekly_result.iloc[-1]
+                    
+                    # 检查周线底分型
+                    has_weekly_bottom_fractal = latest_weekly.get('bottom_fractal', False)
+                    
+                    if has_weekly_bottom_fractal:
+                        if not 'daily_result' in locals():
+                            daily_df = self.api.get_daily_data(symbol, days=60, force_refresh=True)
+                            daily_result = self.calculator.calculate_chanlun(daily_df)
+                        
+                        if not daily_result.empty:
+                            latest_daily = daily_result.iloc[-1]
+                            
+                            # 检查日线突破中枢
+                            current_price = latest_daily['close']
+                            central_high = latest_daily.get('central_bank_high', current_price)
+                            if current_price > central_high:
+                                signal.update({
+                                    "action": "buy",
+                                    "reason": "weekly_bottom_fractal_plus_daily_breakthrough",
+                                    "signal_type": "weekly_fractal_daily_breakthrough",
+                                    "strength": 90,  # 非常高的信号强度
+                                    "position_size": [0.4, 0.5]  # 大仓位
+                                })
+                                logger.info(f"{symbol} 触发复合信号: 周线底分型+日线突破中枢")
+                                self.save_signal(signal)  # 保存信号
+                                return signal
+            
+            # 3. 检查日线底背驰 + 分钟级别放量底分复合信号
+            if 'daily_result' in locals() and not daily_result.empty:
+                latest_daily = daily_result.iloc[-1]
+                
+                # 检查日线底背驰
+                has_daily_divergence = 'divergence' in latest_daily and \
+                                      latest_daily['divergence'] in ['bull', 'bullish', 'bottom']
+                
+                if has_daily_divergence:
+                    # 获取5分钟数据检查放量底分
+                    minute_5m_df = self.api.get_minute_data(symbol, period='5m', days=2)
+                    if not minute_5m_df.empty:
+                        # 设置5分钟参数
+                        self.calculator.set_timeframe_params('5m', {
+                            'fractal_sensitivity': self.config.get('chanlun', {}).get('minute_5_fractal_sensitivity', 2),
+                            'pen_min_length': self.config.get('chanlun', {}).get('minute_5_pen_min_length', 3),
+                            'central_min_length': self.config.get('chanlun', {}).get('minute_5_central_min_length', 3)
+                        })
+                        minute_result = self.calculator.calculate_chanlun(minute_5m_df)
+                        
+                        if not minute_result.empty:
+                            latest_minute = minute_result.iloc[-1]
+                            
+                            # 检查放量底分型
+                            has_bottom_fractal = latest_minute.get('bottom_fractal', False)
+                            has_volume_expansion = 'volume' in latest_minute and 'avg_volume' in latest_minute and \
+                                                 latest_minute['volume'] > latest_minute['avg_volume'] * 1.5
+                            
+                            if has_bottom_fractal and has_volume_expansion:
+                                signal.update({
+                                    "action": "buy",
+                                    "reason": "daily_divergence_plus_minute_volume_fractal",
+                                    "signal_type": "daily_divergence_minute_volume",
+                                    "strength": 80,
+                                    "position_size": [0.25, 0.35]
+                                })
+                                logger.info(f"{symbol} 触发复合信号: 日线底背驰+分钟级别放量底分")
+                                self.save_signal(signal)  # 保存信号
+                                return signal
+        
+        except Exception as e:
+            logger.error(f"识别复合信号失败: {str(e)}")
         
         return signal
     
@@ -430,7 +662,7 @@ class ChanlunMonitor:
             try:
                 # 获取日线数据
                 start_date, end_date = get_valid_date_range_str(30)  # 修复：解包日期范围
-                df = self.api.get_daily_data(symbol, start_date=start_date, end_date=end_date)
+                df = self.api.get_daily_data(symbol, start_date=start_date, end_date=end_date, force_refresh=True)
                 
                 if df.empty:
                     logger.warning(f"股票 {symbol} 获取数据为空")
@@ -488,7 +720,7 @@ class ChanlunMonitor:
     
     def calculate_signal_strength(self, result_df):
         """
-        计算信号强度
+        计算信号强度，增强对背驰和放量条件的权重
         :param result_df: 包含缠论指标的DataFrame
         :return: 信号强度(0-100)
         """
@@ -531,6 +763,27 @@ class ChanlunMonitor:
                     strength -= 25
                 else:
                     strength += 5  # 在中枢内略微偏多
+            
+            # 新增：根据背驰增加强度（高权重）
+            if 'divergence' in latest:
+                if latest['divergence'] in ['bull', 'bullish', 'bottom']:  # 底背驰
+                    strength += 30  # 背驰具有较高权重
+                elif latest['divergence'] in ['bear', 'bearish', 'top']:  # 顶背驰
+                    strength -= 30
+            
+            # 新增：根据放量情况增加强度
+            if 'volume' in latest and 'avg_volume' in latest:
+                volume_ratio = latest['volume'] / latest['avg_volume']
+                if volume_ratio > 1.5:  # 放量超过50%
+                    # 结合当前趋势判断放量的方向性影响
+                    if latest.get('pen_type') == 'up' or latest.get('segment_type') == 'up':
+                        strength += 15  # 上涨趋势中放量
+                    elif latest.get('pen_type') == 'down' or latest.get('segment_type') == 'down':
+                        strength -= 15  # 下跌趋势中放量
+                elif volume_ratio < 0.5:  # 缩量
+                    # 缩量回调通常是买入机会
+                    if latest.get('pen_type') == 'down' or latest.get('segment_type') == 'down':
+                        strength += 8  # 下跌趋势中缩量
         except Exception as e:
             logger.warning(f"计算信号强度失败: {str(e)}")
         
@@ -542,7 +795,7 @@ class ChanlunMonitor:
         :param symbol: 股票代码
         """
         try:
-            # 获取分钟数据
+            # 获取默认分钟数据
             df = self.api.get_minute_data(symbol, period=self.minute_period, days=self.minute_days)
             
             if df.empty:
@@ -555,13 +808,17 @@ class ChanlunMonitor:
             # 检查止损
             self.check_stoploss(symbol, current_price)
             
-            # 分析市场状况
-            market_condition = self.calculator.determine_market_condition(df)
+            # 多级别联立分析逻辑 - 实现15分钟底背驰寻找5分钟放量底分
+            market_condition = self.analyze_multi_timeframe_signal(symbol, df)
             
-            # 检查黑天鹅机会
-            if self.check_black_swan_conditions(df):
-                market_condition = "black_swan_buy"
-                logger.info(f"检测到黑天鹅机会: {symbol}")
+            # 如果没有找到复合信号，使用默认市场状况分析
+            if not market_condition:
+                market_condition = self.calculator.determine_market_condition(df)
+                
+                # 检查黑天鹅机会
+                if self.check_black_swan_conditions(df):
+                    market_condition = "black_swan_buy"
+                    logger.info(f"检测到黑天鹅机会: {symbol}")
             
             # 生成交易信号
             signal = self.generate_signal(df, market_condition, symbol)
@@ -580,10 +837,180 @@ class ChanlunMonitor:
                     self.execute_buy(signal, symbol)
                 elif signal['action'] == 'sell':
                     self.execute_sell(signal, symbol)
+                
+                # 保存所有信号，包括hold信号，便于分析
+                self.save_signal(signal)
+        except Exception as e:
+            logger.error(f"检查股票 {symbol} 时出错: {str(e)}")
+        finally:
+            pass
+            
+    def analyze_multi_timeframe_signal(self, symbol, default_df):
+        """
+        多级别联立分析，寻找复合信号
+        - 通过15分钟底背驰寻找5分钟放量底分的策略
+        
+        :param symbol: 股票代码
+        :param default_df: 默认时间级别的数据
+        :return: 复合信号类型或None
+        """
+        try:
+            # 获取15分钟级别数据
+            df_15m = self.api.get_minute_data(symbol, period='15m', days=2)  # 2天的15分钟数据
+            if df_15m.empty:
+                logger.debug(f"无法获取 {symbol} 的15分钟数据")
+                return None
+            
+            # 获取5分钟级别数据
+            df_5m = self.api.get_minute_data(symbol, period='5m', days=1)  # 1天的5分钟数据
+            if df_5m.empty:
+                logger.debug(f"无法获取 {symbol} 的5分钟数据")
+                return None
+            
+            # 为不同时间周期设置参数
+            self.calculator.set_timeframe_params('15m', {
+                'fractal_sensitivity': self.config.get('chanlun', {}).get('minute_15_fractal_sensitivity', 2),
+                'pen_min_length': self.config.get('chanlun', {}).get('minute_15_pen_min_length', 3),
+                'central_min_length': self.config.get('chanlun', {}).get('minute_15_central_min_length', 3)
+            })
+            
+            self.calculator.set_timeframe_params('5m', {
+                'fractal_sensitivity': self.config.get('chanlun', {}).get('minute_5_fractal_sensitivity', 2),
+                'pen_min_length': self.config.get('chanlun', {}).get('minute_5_pen_min_length', 3),
+                'central_min_length': self.config.get('chanlun', {}).get('minute_5_central_min_length', 3)
+            })
+            
+            # 计算15分钟级别缠论指标
+            result_15m = self.calculator.calculate(df_15m)
+            
+            # 计算5分钟级别缠论指标
+            result_5m = self.calculator.calculate(df_5m)
+            
+            # 检查15分钟底背驰
+            has_15m_bottom_divergence = self.check_divergence(result_15m, 'bottom')
+            
+            # 检查5分钟放量底分型
+            has_5m_bottom_fractal = self.check_volume_fractal(result_5m, 'bottom')
+            
+            # 如果同时满足15分钟底背驰和5分钟放量底分，返回复合买入信号
+            if has_15m_bottom_divergence and has_5m_bottom_fractal:
+                logger.info(f"检测到复合买入信号: {symbol} - 15分钟底背驰 + 5分钟放量底分型")
+                return "multi_timeframe_buy"  # 复合买入信号
+                
+            # 也可以添加其他复合信号的判断逻辑
+            # 例如日线二买 + 分钟级别底背驰
+            
+            return None
             
         except Exception as e:
-            logger.error(f"检查股票 {symbol} 失败: {str(e)}")
+            logger.error(f"多级别联立分析失败: {str(e)}")
+            return None
+            
+    def check_divergence(self, result_df, divergence_type):
+        """
+        检查是否存在指定类型的背驰
+        
+        :param result_df: 计算结果DataFrame
+        :param divergence_type: 'top' 或 'bottom'
+        :return: 是否存在背驰
+        """
+        if result_df.empty:
+            return False
+            
+        try:
+            # 检查是否有背驰标识列
+            if 'divergence' not in result_df.columns:
+                # 如果没有直接的背驰列，可以基于其他指标计算
+                # 这里使用简化的判断逻辑，实际项目中可能需要更复杂的算法
+                return False
+                
+            # 检查最近的K线是否有背驰
+            latest = result_df.iloc[-1]
+            
+            # 修复：支持多种背驰标记格式
+            # 兼容calculator.py中的'bull'/'bear'格式和monitor.py中预期的'top'/'bottom'格式
+            if divergence_type == 'bottom':
+                # 底背驰可以是'bull'、'bullish'或任何表示底部的标记
+                return latest['divergence'] in ['bull', 'bullish', 'bottom']
+            elif divergence_type == 'top':
+                # 顶背驰可以是'bear'、'bearish'或任何表示顶部的标记
+                return latest['divergence'] in ['bear', 'bearish', 'top']
+                
+            return False
+            
+        except Exception as e:
+            logger.warning(f"检查背驰失败: {str(e)}")
+            return False
+            
+    def check_volume_fractal(self, result_df, fractal_type):
+        """
+        检查是否存在放量的指定类型分型
+        
+        :param result_df: 计算结果DataFrame
+        :param fractal_type: 'top' 或 'bottom'
+        :return: 是否存在放量分型
+        """
+        if result_df.empty:
+            return False
+            
+        try:
+            # 检查最近的分型
+            if fractal_type == 'bottom' and 'bottom_fractal' in result_df.columns:
+                # 找到最近的底分型
+                latest_fractal = result_df[result_df['bottom_fractal'] == True].tail(1)
+                if latest_fractal.empty:
+                    return False
+                    
+                # 检查是否放量
+                fractal_idx = latest_fractal.index[0]
+                if fractal_idx > 5:  # 确保有足够的数据计算平均成交量
+                    avg_volume = result_df.iloc[fractal_idx-5:fractal_idx]['volume'].mean()
+                    current_volume = result_df.iloc[fractal_idx]['volume']
+                    
+                    # 放量阈值，可从配置中读取
+                    volume_threshold = self.config.get('chanlun', {}).get('volume_increase_threshold', 1.5)
+                    return current_volume > avg_volume * volume_threshold
+                    
+            return False
+            
+        except Exception as e:
+            logger.warning(f"检查放量分型失败: {str(e)}")
+            return False
     
+    def save_signal(self, signal):
+        """
+        保存交易信号到文件，确保所有信号都被记录
+        :param signal: 交易信号字典
+        """
+        try:
+            # 创建信号目录
+            signals_dir = os.path.join(self.config.get('output_dir', 'output'), 'signals')
+            os.makedirs(signals_dir, exist_ok=True)
+            
+            # 生成文件名（按日期分组）
+            date_str = datetime.now().strftime("%Y%m%d")
+            filename = f"signals_{date_str}.json"
+            filepath = os.path.join(signals_dir, filename)
+            
+            # 读取现有信号
+            existing_signals = []
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        existing_signals = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    existing_signals = []
+            
+            # 添加新信号
+            existing_signals.append(signal)
+            
+            # 保存回文件
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(existing_signals, f, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            logger.error(f"保存信号失败: {str(e)}")
+            
     def start_weekly_scan(self):
         """
         启动周线扫描模式

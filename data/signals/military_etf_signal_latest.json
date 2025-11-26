@@ -1,0 +1,146 @@
+{
+  "symbol": "512660",
+  "name": "军工ETF",
+  "timestamp": "2025-11-26 20:23:17",
+  "signal_type": "weak_buy",
+  "signal_strength": 50,
+  "confidence_level": "low",
+  "weekly_confirmation": "无确认",
+  "weekly_data": {
+    "success": true,
+    "weekly_level": "low",
+    "confidence_score": 0.3,
+    "latest_data": {
+      "date": "2025-11-26",
+      "close": 1.16,
+      "ma5": 1.175,
+      "ma5_slope": -0.792800226820364,
+      "price_vs_ma5_pct": -1.2765957446808616
+    },
+    "conditions": {
+      "price_above_ma5": false,
+      "ma5_slope_positive": false,
+      "price_below_ma5_but_within_5pct": true,
+      "ma5_slope_flat_or_slightly_down": false
+    }
+  },
+  "daily_data": {
+    "success": true,
+    "conditions_met": 4,
+    "total_conditions": 5,
+    "buy_signal": true,
+    "conditions": {
+      "recent_up_pen": true,
+      "recent_down_pen": false,
+      "has_central_bank": true,
+      "has_divergence": true,
+      "has_bottom_fractal": true
+    },
+    "divergence_strength": 1.0,
+    "pen_count": 6,
+    "central_bank_count": 4,
+    "details": {
+      "pens": [
+        {
+          "start_idx": 13,
+          "end_idx": 18,
+          "start_date": "2025-09-16 00:00:00",
+          "end_date": "2025-09-23 00:00:00",
+          "type": "up",
+          "start_price": 1.17,
+          "end_price": 1.21,
+          "price_change_pct": 3.4188034188034218,
+          "length": 6
+        },
+        {
+          "start_idx": 18,
+          "end_idx": 26,
+          "start_date": "2025-09-23 00:00:00",
+          "end_date": "2025-10-13 00:00:00",
+          "type": "down",
+          "start_price": 1.21,
+          "end_price": 1.199,
+          "price_change_pct": -0.9090909090909007,
+          "length": 9
+        },
+        {
+          "start_idx": 26,
+          "end_idx": 38,
+          "start_date": "2025-10-13 00:00:00",
+          "end_date": "2025-10-29 00:00:00",
+          "type": "up",
+          "start_price": 1.199,
+          "end_price": 1.246,
+          "price_change_pct": 3.919933277731437,
+          "length": 13
+        },
+        {
+          "start_idx": 38,
+          "end_idx": 43,
+          "start_date": "2025-10-29 00:00:00",
+          "end_date": "2025-11-05 00:00:00",
+          "type": "down",
+          "start_price": 1.246,
+          "end_price": 1.18,
+          "price_change_pct": -5.296950240770471,
+          "length": 6
+        },
+        {
+          "start_idx": 43,
+          "end_idx": 51,
+          "start_date": "2025-11-05 00:00:00",
+          "end_date": "2025-11-17 00:00:00",
+          "type": "up",
+          "start_price": 1.18,
+          "end_price": 1.202,
+          "price_change_pct": 1.8644067796610189,
+          "length": 9
+        }
+      ],
+      "central_banks": [
+        {
+          "start_idx": 18,
+          "end_idx": 43,
+          "start_date": "2025-09-23 00:00:00",
+          "end_date": "2025-11-05 00:00:00",
+          "high": 1.21,
+          "low": 1.199,
+          "middle": 1.2045,
+          "range_pct": 0.917431192660542,
+          "pen_count": 3
+        },
+        {
+          "start_idx": 26,
+          "end_idx": 51,
+          "start_date": "2025-10-13 00:00:00",
+          "end_date": "2025-11-17 00:00:00",
+          "high": 1.202,
+          "low": 1.199,
+          "middle": 1.2005,
+          "range_pct": 0.250208507089232,
+          "pen_count": 3
+        }
+      ],
+      "recent_fractals": {
+        "top_count": 1,
+        "bottom_count": 3
+      }
+    }
+  },
+  "trade_recommendation": "谨慎买入",
+  "confidence_metrics": {
+    "weekly_high_confidence": false,
+    "weekly_medium_confidence": false,
+    "daily_buy_signal": true,
+    "divergence_strength": 0,
+    "macd_area_ratio": 0,
+    "conditions_satisfaction_ratio": 1.0,
+    "total_met_conditions": 3,
+    "total_conditions": 3
+  },
+  "confidence_explanation": "仅日线买入信号，需谨慎",
+  "confidence_score": 30.0,
+  "confidence_evaluation": "弱势 - 信号较弱，建议观察为主",
+  "expired": false,
+  "expiry_reason": "信号仍然有效"
+}

@@ -1,0 +1,48 @@
+{
+  "bottom_fractals": [
+    {
+      "center_date": "2025-10-15",
+      "low": 1.206,
+      "high": 1.232,
+      "confirmation_day": "2025-10-17",
+      "confirmation_valid": true,
+      "strength_valid": false
+    },
+    {
+      "center_date": "2025-10-20",
+      "low": 1.172,
+      "high": 1.195,
+      "confirmation_day": "2025-10-22",
+      "confirmation_valid": true,
+      "strength_valid": false
+    },
+    {
+      "center_date": "2025-10-23",
+      "low": 1.158,
+      "high": 1.179,
+      "confirmation_day": "2025-10-27",
+      "confirmation_valid": true,
+      "strength_valid": true
+    }
+  ],
+  "top_fractals": [
+    {
+      "center_date": "2025-10-29",
+      "high": 1.246,
+      "low": 1.23,
+      "confirmation_day": "2025-10-31",
+      "confirmation_valid": false,
+      "strength_valid": true
+    }
+  ],
+  "valid_trading_signals": [
+    {
+      "type": "buy",
+      "signal_type": "bottom",
+      "center_date": "2025-10-23",
+      "confirmation_day": "2025-10-27",
+      "strength_valid": true,
+      "confirmation_valid": true
+    }
+  ]
+}

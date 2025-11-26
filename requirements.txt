@@ -26,3 +26,6 @@ xlsxwriter==3.0.9
 black==22.3.0
 flake8==4.0.1
 isort==5.12.0
+
+# 注意：系统使用的其他库（如os, sys, logging, json, shutil等）为Python标准库，无需单独安装
+# 当前requirements.txt已包含系统所有外部依赖项，确保版本兼容Python 3.8.2

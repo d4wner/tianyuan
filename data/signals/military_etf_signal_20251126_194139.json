@@ -1,0 +1,21 @@
+{
+  "symbol": "512660",
+  "name": "军工ETF",
+  "timestamp": "2025-11-26 19:41:39",
+  "signal_type": "weak_buy",
+  "signal_strength": 50,
+  "confidence_level": "low",
+  "weekly_confirmation": "无确认",
+  "weekly_data": {
+    "success": true,
+    "weekly_level": "low",
+    "confidence_score": 0.3,
+    "latest_data": {
+      "date": "2025-11-26",
+      "close": 1.16,
+      "ma5": 1.175,
+      "ma5_slope": -0.792800226820364,
+      "price_vs_ma5_pct": -1.2765957446808616
+    },
+    "conditions": {
+      "price_above_ma5": 

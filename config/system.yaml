@@ -28,6 +28,33 @@ risk_management:
       contraction_threshold: 70%
       normal_breakthrough: 120%
       strong_breakthrough: 150%
+  # 分钟级别特定配置
+  minute_risk_settings:
+    enabled: true
+    timeframe_weights:
+      5m: 0.3
+      15m: 0.4
+      30m: 0.2
+      60m: 0.1
+    volume_thresholds:
+      5m:
+        abnormal: 2000000
+        contraction: 500000
+        confirmation: 1000000
+      15m:
+        abnormal: 5000000
+        contraction: 1500000
+        confirmation: 3000000
+      30m:
+        abnormal: 10000000
+        contraction: 3000000
+        confirmation: 6000000
+      60m:
+        abnormal: 20000000
+        contraction: 6000000
+        confirmation: 12000000
+    multi_timeframe_divergence_threshold: 0.7
+    max_position_ratio_without_weekly_confirmation: 0.25
   stop_loss_settings:
     stop_loss_type: "dynamic"
     stop_loss_atr_period: 14
@@ -156,10 +183,32 @@ strategies:
         required_conditions:
         - daily_confirmation
         stop_loss: 0.015
+      multi_timeframe_buy:
+        confidence_level: high
+        execution_timing:
+        - higher_timeframe_divergence
+        - lower_timeframe_volume_fractal
+        position_range:
+        - 0.15
+        - 0.25
+        required_conditions:
+        - higher_timeframe_divergence_confirmed
+        - lower_timeframe_volume_confirmation
+        stop_loss: 0.02
     timeframe_priority:
       execution: minute
       primary: daily
       secondary: weekly
+    # 多级别联动配置
+    multi_timeframe_settings:
+      enabled: true
+      primary_timeframe: "15m"
+      secondary_timeframe: "5m"
+      divergence_requirement: "confirmed"
+      volume_thresholds:
+        min_multiplier: 1.5
+        max_multiplier: 5.0
+      time_difference_threshold: 30  # 分钟数
     version: 2025-10-16
 
 # 系统核心配置
@@ -186,14 +235,43 @@ system:
           scale: "5"
           ma: "no"
           datalen: "10000"
+        minute_15m:
+          scale: "15"
+          ma: "no"
+          datalen: "5000"
+        minute_30m:
+          scale: "30"
+          ma: "no"
+          datalen: "3000"
+        minute_60m:
+          scale: "60"
+          ma: "no"
+          datalen: "2000"
     tencent:
       symbol_format: with_prefix
       enabled: true
       weekly_url: https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
+      minute_urls:
+        5m: https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
+        15m: https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
+        30m: https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
+        60m: https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
       params:
         weekly:
           _var: "kline_week"
           param: "{symbol},week,,,320,qfq"
+        minute_5m:
+          _var: "kline_5m"
+          param: "{symbol},m5,,,1000,qfq"
+        minute_15m:
+          _var: "kline_15m"
+          param: "{symbol},m15,,,500,qfq"
+        minute_30m:
+          _var: "kline_30m"
+          param: "{symbol},m30,,,300,qfq"
+        minute_60m:
+          _var: "kline_60m"
+          param: "{symbol},m60,,,200,qfq"
   
   # 自动风险控制
   auto_risk_control:

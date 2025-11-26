@@ -324,6 +324,152 @@ def generate_backtest_report(symbol, strategy_name, start_date, end_date,
     logger.info(f"回测报告生成完成: 总收益 {total_return:.2f}%")
     return report
 
+def generate_chanlun_analysis_report(symbol, df, calculator, start_date=None, end_date=None):
+    """生成修正后的缠论分析报告
+    
+    根据错误分析报告中的建议，生成包含正确缠论买卖点判定、信号强度计算和验证条件的分析报告
+    
+    Args:
+        symbol: 股票代码
+        df: 数据框，包含K线数据
+        calculator: ChanlunCalculator实例
+        start_date: 开始日期
+        end_date: 结束日期
+        
+    Returns:
+        dict: 修正后的缠论分析报告
+    """
+    logger.info(f"生成修正后的缠论分析报告: {symbol}")
+    
+    # 根据日期筛选数据
+    if start_date and end_date:
+        try:
+            start_dt = parse_date(start_date)
+            end_dt = parse_date(end_date)
+            # 假设df有date列
+            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+        except Exception as e:
+            logger.warning(f"日期筛选失败，使用全部数据: {e}")
+    
+    # 确保数据不为空
+    if df.empty:
+        logger.warning(f"没有数据可分析: {symbol}")
+        return {"error": "没有数据可分析"}
+    
+    # 执行缠论计算
+    result = calculator.calculate(df)
+    
+    # 初始化报告结构
+    report = {
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "type": "chanlun_analysis",
+        "symbol": symbol,
+        "date_range": {
+            "start": df.iloc[0]['date'].strftime("%Y-%m-%d") if hasattr(df.iloc[0]['date'], 'strftime') else str(df.iloc[0]['date']),
+            "end": df.iloc[-1]['date'].strftime("%Y-%m-%d") if hasattr(df.iloc[-1]['date'], 'strftime') else str(df.iloc[-1]['date'])
+        },
+        "market_condition": calculator.determine_market_condition(result),
+        "signals": [],
+        "signal_summary": {},
+        "level_statistics": {},
+        "key_findings": []
+    }
+    
+    # 提取信号数据
+    signals_df = result[result['signal'].isin(['buy', 'sell'])].copy()
+    
+    if not signals_df.empty:
+        # 构建信号列表
+        for _, row in signals_df.iterrows():
+            signal_info = {
+                "date": row['date'].strftime("%Y-%m-%d") if hasattr(row['date'], 'strftime') else str(row['date']),
+                "price": round(row.get('close', 0), 4),
+                "signal_type": row['signal'],
+                "signal_strength": round(row.get('signal_strength', 0), 3),
+                "chanlun_level": row.get('signal_level', 'unknown'),
+                "signal_source": row.get('signal_source', ''),
+                "validation_conditions": row.get('signal_conditions', []),
+                "fractal_strength": round(row.get('fractal_strength', 0), 2),
+                "divergence_strength_score": round(row.get('divergence_strength_score', 0), 2),
+                "structure_match_score": round(row.get('structure_match_score', 0), 2)
+            }
+            
+            # 添加形成原因
+            reasons = []
+            if row.get('bottom_fractal', False):
+                reasons.append("底分型形成")
+            elif row.get('top_fractal', False):
+                reasons.append("顶分型形成")
+                
+            if row.get('divergence', '') == 'bull':
+                reasons.append("MACD底背离")
+            elif row.get('divergence', '') == 'bear':
+                reasons.append("MACD顶背离")
+                
+            if row.get('central_bank', False):
+                reasons.append("中枢确认")
+                
+            # 根据验证条件添加原因
+            if signal_info['validation_conditions']:
+                reasons.extend(signal_info['validation_conditions'])
+                
+            signal_info['formation_reason'] = ' + '.join(reasons)
+            report['signals'].append(signal_info)
+        
+        # 计算信号摘要统计
+        buy_signals = signals_df[signals_df['signal'] == 'buy']
+        sell_signals = signals_df[signals_df['signal'] == 'sell']
+        
+        report['signal_summary'] = {
+            "total_signals": len(signals_df),
+            "buy_signals": len(buy_signals),
+            "sell_signals": len(sell_signals),
+            "avg_buy_strength": round(buy_signals['signal_strength'].mean(), 3) if not buy_signals.empty else 0,
+            "avg_sell_strength": round(sell_signals['signal_strength'].mean(), 3) if not sell_signals.empty else 0
+        }
+        
+        # 计算级别统计
+        level_counts = {}
+        for level in ['buy_1st', 'buy_2nd', 'buy_3rd', 'sell_1st', 'sell_2nd', 'sell_3rd']:
+            level_counts[level] = len(signals_df[signals_df['signal_level'] == level])
+            
+        report['level_statistics'] = level_counts
+        
+        # 生成关键发现
+        key_findings = []
+        
+        # 检查高强度信号
+        strong_signals = signals_df[signals_df['signal_strength'] >= 0.8]
+        if not strong_signals.empty:
+            key_findings.append(f"发现 {len(strong_signals)} 个高强度信号(≥0.8)，可信度较高")
+            
+        # 检查信号强度异常
+        weak_level_3_signals = signals_df[
+            (signals_df['signal_level'].isin(['buy_3rd', 'sell_3rd'])) & 
+            (signals_df['signal_strength'] < 0.6)
+        ]
+        if not weak_level_3_signals.empty:
+            key_findings.append(f"警告：发现 {len(weak_level_3_signals)} 个三级买卖点信号强度不足，可能需要验证")
+            
+        # 检查买卖点级别分布
+        buy_level_1_count = len(signals_df[signals_df['signal_level'] == 'buy_1st'])
+        if buy_level_1_count > 0:
+            key_findings.append(f"发现 {buy_level_1_count} 个一买信号，可能是潜在的底部反转点")
+            
+        sell_level_1_count = len(signals_df[signals_df['signal_level'] == 'sell_1st'])
+        if sell_level_1_count > 0:
+            key_findings.append(f"发现 {sell_level_1_count} 个一卖信号，可能是潜在的顶部反转点")
+            
+        # 检查背驰信号
+        divergence_signals = signals_df[signals_df['divergence'] != 'none']
+        if not divergence_signals.empty:
+            key_findings.append(f"发现 {len(divergence_signals)} 个背驰相关信号，动量可能发生变化")
+            
+        report['key_findings'] = key_findings
+    
+    logger.info(f"缠论分析报告生成完成: {symbol}，共{len(report['signals'])}个信号")
+    return report
+
 def generate_multiple_backtest_report(reports):
     """生成多策略/多标的回测汇总报告"""
     logger.info(f"生成多回测汇总报告，共{len(reports)}个回测结果")

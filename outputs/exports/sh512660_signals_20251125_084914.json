@@ -1,0 +1,513 @@
+[
+    {
+        "date":1736467200000,
+        "type":"sell",
+        "price":0.967,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1736726400000,
+        "type":"buy",
+        "price":0.964,
+        "strength":0.2613816526,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1736812800000,
+        "type":"sell",
+        "price":1.0,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1736985600000,
+        "type":"buy",
+        "price":0.983,
+        "strength":0.4266666667,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1737331200000,
+        "type":"sell",
+        "price":1.002,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1737590400000,
+        "type":"sell",
+        "price":0.982,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1737936000000,
+        "type":"sell",
+        "price":0.98,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1738713600000,
+        "type":"buy",
+        "price":0.988,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1739404800000,
+        "type":"sell",
+        "price":1.028,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1739491200000,
+        "type":"buy",
+        "price":1.025,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1739750400000,
+        "type":"sell",
+        "price":1.025,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1739836800000,
+        "type":"buy",
+        "price":0.999,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1740355200000,
+        "type":"sell",
+        "price":1.046,
+        "strength":0.5666666667,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1740441600000,
+        "type":"buy",
+        "price":1.038,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1741305600000,
+        "type":"sell",
+        "price":1.072,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1741651200000,
+        "type":"buy",
+        "price":1.099,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1741737600000,
+        "type":"sell",
+        "price":1.095,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1742428800000,
+        "type":"buy",
+        "price":1.082,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1742774400000,
+        "type":"buy",
+        "price":1.059,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1743033600000,
+        "type":"buy",
+        "price":1.049,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1743379200000,
+        "type":"buy",
+        "price":1.021,
+        "strength":0.3,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1743465600000,
+        "type":"sell",
+        "price":1.035,
+        "strength":0.3666666667,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1743984000000,
+        "type":"buy",
+        "price":0.927,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1744761600000,
+        "type":"buy",
+        "price":1.0,
+        "strength":0.4533333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1744934400000,
+        "type":"buy",
+        "price":0.995,
+        "strength":0.5090711512,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1745280000000,
+        "type":"sell",
+        "price":1.006,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1745539200000,
+        "type":"buy",
+        "price":0.998,
+        "strength":0.5066666667,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1747872000000,
+        "type":"sell",
+        "price":1.04,
+        "strength":0.3666666667,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1748304000000,
+        "type":"sell",
+        "price":1.035,
+        "strength":0.3666666667,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1748908800000,
+        "type":"sell",
+        "price":1.048,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1749081600000,
+        "type":"buy",
+        "price":1.052,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1749427200000,
+        "type":"sell",
+        "price":1.062,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1749513600000,
+        "type":"buy",
+        "price":1.045,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1749686400000,
+        "type":"buy",
+        "price":1.041,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1749772800000,
+        "type":"sell",
+        "price":1.056,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1750204800000,
+        "type":"sell",
+        "price":1.062,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1750377600000,
+        "type":"buy",
+        "price":1.034,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1750896000000,
+        "type":"sell",
+        "price":1.091,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1751328000000,
+        "type":"sell",
+        "price":1.143,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1751587200000,
+        "type":"buy",
+        "price":1.116,
+        "strength":0.5333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1752019200000,
+        "type":"sell",
+        "price":1.116,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1752105600000,
+        "type":"buy",
+        "price":1.113,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1752192000000,
+        "type":"sell",
+        "price":1.128,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1752537600000,
+        "type":"buy",
+        "price":1.119,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1753142400000,
+        "type":"sell",
+        "price":1.168,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1753228800000,
+        "type":"buy",
+        "price":1.153,
+        "strength":0.5333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1753833600000,
+        "type":"sell",
+        "price":1.188,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1754265600000,
+        "type":"buy",
+        "price":1.199,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1754524800000,
+        "type":"sell",
+        "price":1.238,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1754870400000,
+        "type":"sell",
+        "price":1.241,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1754956800000,
+        "type":"buy",
+        "price":1.234,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1755129600000,
+        "type":"sell",
+        "price":1.229,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1755216000000,
+        "type":"buy",
+        "price":1.243,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1756080000000,
+        "type":"sell",
+        "price":1.304,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1756252800000,
+        "type":"sell",
+        "price":1.272,
+        "strength":0.3,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1756339200000,
+        "type":"buy",
+        "price":1.299,
+        "strength":0.5333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1756684800000,
+        "type":"sell",
+        "price":1.307,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1756944000000,
+        "type":"buy",
+        "price":1.166,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1757289600000,
+        "type":"sell",
+        "price":1.193,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1757635200000,
+        "type":"sell",
+        "price":1.2,
+        "strength":0.2,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1757980800000,
+        "type":"buy",
+        "price":1.185,
+        "strength":0.6116123067,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1758153600000,
+        "type":"buy",
+        "price":1.184,
+        "strength":0.5515962948,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1758585600000,
+        "type":"buy",
+        "price":1.192,
+        "strength":0.9333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1758844800000,
+        "type":"sell",
+        "price":1.196,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1759104000000,
+        "type":"buy",
+        "price":1.2,
+        "strength":0.5333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1760313600000,
+        "type":"buy",
+        "price":1.249,
+        "strength":0.3,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1760400000000,
+        "type":"sell",
+        "price":1.233,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1760486400000,
+        "type":"buy",
+        "price":1.23,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1760572800000,
+        "type":"sell",
+        "price":1.218,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1760918400000,
+        "type":"buy",
+        "price":1.18,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1761004800000,
+        "type":"sell",
+        "price":1.196,
+        "strength":0.1333333333,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    },
+    {
+        "date":1761177600000,
+        "type":"buy",
+        "price":1.178,
+        "strength":0.1333333333,
+        "reason":"\u5e95\u5206\u578b\u5f62\u6210 + \u4e70\u5165\u4fe1\u53f7"
+    },
+    {
+        "date":1761696000000,
+        "type":"sell",
+        "price":1.243,
+        "strength":0.5,
+        "reason":"\u9876\u5206\u578b\u5f62\u6210 + \u5356\u51fa\u4fe1\u53f7"
+    }
+]

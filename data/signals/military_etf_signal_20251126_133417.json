@@ -1,0 +1,29 @@
+{
+  "symbol": "512660",
+  "name": "军工ETF",
+  "timestamp": "2025-11-26 13:34:17",
+  "signal_type": "none",
+  "signal_strength": 0,
+  "confidence_level": "none",
+  "weekly_confirmation": "未确认",
+  "weekly_data": {
+    "success": false,
+    "error": "'WeeklyAnalyzer' object has no attribute 'analyze_weekly_conditions'"
+  },
+  "daily_data": {
+    "success": false,
+    "error": "single positional indexer is out-of-bounds",
+    "conditions_met": 0,
+    "total_conditions": 5
+  },
+  "trade_recommendation": "观望",
+  "conditions": {
+    "weekly_high_confidence": false,
+    "weekly_medium_confidence": false,
+    "daily_buy_signal": false,
+    "total_met_conditions": 3,
+    "total_conditions": 3
+  },
+  "expired": true,
+  "expiry_reason": "未生成有效买入信号"
+}

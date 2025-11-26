@@ -365,17 +365,26 @@ class StockDataFetcher:
         return pd.DataFrame()
     
     def get_daily_data(self, symbol: str, start_date: Optional[str] = None, 
-                      end_date: Optional[str] = None) -> pd.DataFrame:
+                      end_date: Optional[str] = None, force_refresh: bool = False, 
+                      days: Optional[int] = None) -> pd.DataFrame:
         """获取日线数据"""
         try:
             symbol = self._validate_symbol(symbol)
+            # 处理days参数
+            if days is not None:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_dt = datetime.now() - timedelta(days=days)
+                start_date = start_dt.strftime('%Y-%m-%d')
             start_dt, end_dt, _, _ = self._validate_dates(start_date, end_date)
             full_symbol = f"{self._get_market_prefix(symbol)}{symbol}"
             
-            # 缓存检查
+            # 缓存检查 - 如果end_date是最近7天内或强制刷新，则不使用缓存
             cache_key = self._get_cache_key('daily', symbol, start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d"))
             cached_data = self._get_from_cache(cache_key)
-            if cached_data is not None:
+            
+            # 检查是否需要强制刷新缓存（最近7天内的数据或用户要求强制刷新）
+            should_refresh = force_refresh or (datetime.now() - end_dt).days < 7
+            if cached_data is not None and not should_refresh:
                 return cached_data
             
             # 新浪接口请求

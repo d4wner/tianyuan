@@ -61,9 +61,19 @@ def update_sh512660_data(start_date="2025-11-01", end_date="2025-11-24"):
     return df
 
 def main():
-    """主函数"""
+    """主函数，支持命令行参数"""
+    import argparse
+    
+    # 创建参数解析器
+    parser = argparse.ArgumentParser(description='更新军工ETF(512660)数据')
+    parser.add_argument('--start_date', type=str, default='2025-11-01', help='开始日期 (YYYY-MM-DD)')
+    parser.add_argument('--end_date', type=str, default='2025-11-24', help='结束日期 (YYYY-MM-DD)')
+    
+    # 解析命令行参数
+    args = parser.parse_args()
+    
     # 获取最新的军工ETF数据
-    df = update_sh512660_data()
+    df = update_sh512660_data(args.start_date, args.end_date)
     
     if df is not None:
         # 显示最新的几条数据
