@@ -1,0 +1,166 @@
+{
+  "basic_info": {
+    "code": "512690",
+    "name": "酒ETF",
+    "analysis_year": 2025,
+    "data_range": "2025年1月-2025年11月27日",
+    "data_completeness": {
+      "actual_days": 219,
+      "expected_days": 231,
+      "missing_days": 12
+    },
+    "price_range": {
+      "min": 0.537,
+      "max": 0.662
+    },
+    "annual_volatility": 19.3,
+    "volatility_level": "中波动"
+  },
+  "central_analysis": [
+    {
+      "quarter": "2025年1季度",
+      "trading_range_90": "0.565 - 0.646",
+      "amplitude_90": 14.3,
+      "coverage_rate": 82,
+      "coverage_sample": "10根（46/10）",
+      "support_times": 4,
+      "pressure_times": 1,
+      "central_judgment": "无效中枢（压力次数1<2次）"
+    },
+    {
+      "quarter": "2025年2季度",
+      "trading_range_90": "0.547 - 0.622",
+      "amplitude_90": 13.7,
+      "coverage_rate": 76,
+      "coverage_sample": "10根（45/10）",
+      "support_times": 4,
+      "pressure_times": 2,
+      "central_judgment": "有效中枢"
+    },
+    {
+      "quarter": "2025年3季度",
+      "trading_range_90": "0.555 - 0.625",
+      "amplitude_90": 12.6,
+      "coverage_rate": 79,
+      "coverage_sample": "10根（52/10）",
+      "support_times": 3,
+      "pressure_times": 2,
+      "central_judgment": "有效中枢"
+    },
+    {
+      "quarter": "2025年4季度",
+      "trading_range_90": "0.578 - 0.604",
+      "amplitude_90": 4.5,
+      "coverage_rate": 85,
+      "coverage_sample": "10根（30/10）",
+      "support_times": 4,
+      "pressure_times": 2,
+      "central_judgment": "无效中枢（90%成交区间振幅4.5%<8%）"
+    }
+  ],
+  "signal_analysis": [
+    {
+      "central_name": "2025年2季度",
+      "central_range": "0.547 - 0.622",
+      "signal_type": "破中枢反抽一买",
+      "break_verify": "满足（收盘价0.534≤0.542+创新低）",
+      "rebound_verify": "未满足（无反抽日收盘价≥0.552）",
+      "volume_verify": "未满足（成交量未≥近5日均量×85%）",
+      "macd_verify": "未满足（MACD未形成底背驰+绿柱未缩短30%）",
+      "final_signal_type": "潜在监控信号（低置信度）"
+    },
+    {
+      "central_name": "2025年3季度",
+      "central_range": "0.555 - 0.625",
+      "signal_type": "破中枢反抽一买",
+      "break_verify": "满足（收盘价0.539≤0.549+创新低）",
+      "rebound_verify": "满足（反抽日收盘价0.564≥0.561）",
+      "volume_verify": "未满足（成交量未≥近5日均量×85%）",
+      "macd_verify": "未满足（MACD未形成底背驰+绿柱未缩短30%）",
+      "final_signal_type": "潜在监控信号（待量能和MACD验证）"
+    }
+  ],
+  "trading_params": [
+    {
+      "param_type": "买入价格",
+      "value_rule": "反抽达标日收盘价",
+      "explain": "例如：若Q3中枢反抽达标日收盘价为0.563元，则买入价格为0.563元"
+    },
+    {
+      "param_type": "止损价格",
+      "value_rule": "对应中枢破位最低价×0.99",
+      "explain": "例如：中枢破位最低价为0.549元，则止损价格=0.549×0.99=0.544元"
+    },
+    {
+      "param_type": "止盈价格",
+      "value_rule": "对应中枢中轨",
+      "explain": "例如：中枢中轨=(0.555+0.625)/2=0.59元"
+    },
+    {
+      "param_type": "建议仓位",
+      "value_rule": "≤15%",
+      "explain": "低置信度额外下调（16万本金单次≤2.4万）"
+    },
+    {
+      "param_type": "风险收益比",
+      "value_rule": "≥1.5",
+      "explain": "计算逻辑：(止盈价-买入价)/(买入价-止损价)≥1.5，例如：(0.59-0.563)/(0.563-0.544)=1.421≥1.5"
+    }
+  ],
+  "signal_summary": {
+    "total_signals": 2,
+    "signal_types": [
+      {
+        "type": "潜在监控信号（低置信度）",
+        "count": 1,
+        "percentage": 50.0
+      },
+      {
+        "type": "潜在监控信号（待量能和MACD验证）",
+        "count": 1,
+        "percentage": 50.0
+      }
+    ],
+    "signal_summary": "2025年512690酒ETF共产生2个潜在交易信号\n信号类型分布：\n- 潜在监控信号（低置信度）：1个（50.0%）\n- 潜在监控信号（待量能和MACD验证）：1个（50.0%）\n\n重点关注信号：\n- 信号类型：破中枢反抽一买\n- 对应中枢：2025年3季度（0.555 - 0.625）\n- 信号状态：潜在监控信号（待量能和MACD验证）\n- 破位验证：满足（收盘价0.539≤0.549+创新低）\n- 反抽验证：满足（反抽日收盘价0.564≥0.561）",
+    "primary_signal": {
+      "central_name": "2025年3季度",
+      "central_range": "0.555 - 0.625",
+      "signal_type": "破中枢反抽一买",
+      "break_verify": "满足（收盘价0.539≤0.549+创新低）",
+      "rebound_verify": "满足（反抽日收盘价0.564≥0.561）",
+      "volume_verify": "未满足（成交量未≥近5日均量×85%）",
+      "macd_verify": "未满足（MACD未形成底背驰+绿柱未缩短30%）",
+      "final_signal_type": "潜在监控信号（待量能和MACD验证）"
+    }
+  },
+  "risk_control": {
+    "risk_control_items": [
+      {
+        "risk_type": "波动率风险",
+        "description": "该ETF波动率为19.3%（中波动），应采取相应仓位控制",
+        "control_measure": "中波动ETF，单次最高仓位不超过15%"
+      },
+      {
+        "risk_type": "市场系统性风险",
+        "description": "ETF受大盘系统性影响较大，需关注整体市场走势",
+        "control_measure": "设置组合止损线，若大盘下跌超过5%，考虑减仓"
+      },
+      {
+        "risk_type": "信号置信度风险",
+        "description": "当前信号为潜在监控信号，量能和MACD未完全验证",
+        "control_measure": "分批建仓，首次不超过5%仓位，验证后再加仓"
+      },
+      {
+        "risk_type": "止损风险",
+        "description": "需严格执行止损纪律，避免单笔亏损过大",
+        "control_measure": "设置硬性止损单，价格触发自动卖出"
+      }
+    ],
+    "risk_summary": "512690酒ETF 2025年风险控制要点：\n        1. 严格执行仓位控制：单次不超过15%，分批建仓降低风险\n        2. 严格止损：设置硬性止损单，止损价格不低于中枢下沿×0.98\n        3. 信号验证：重点关注量能和MACD指标是否验证信号有效性\n        4. 分批操作：可将计划仓位分2-3次执行，降低单次决策风险\n        5. 定期再评估：每两周重新评估信号有效性，及时调整策略"
+  },
+  "conclusion": {
+    "conclusion_text": "512690酒ETF 2025年分析结论\n\n一、基本情况：\n- 年度波动率：19.3%（中波动）\n- 2025年价格区间：0.537 - 0.662\n- 有效中枢数量：2个\n\n二、最新有效中枢：\n- 时期：2025年3季度\n- 价格区间：0.555 - 0.625\n- 振幅：12.6%\n\n三、信号结论：\n- 当前有2个潜在交易信号\n- 重点关注信号：潜在监控信号（待量能和MACD验证）\n- 对应中枢：2025年3季度\n\n四、交易建议：\n- 计算逻辑：(止盈价-买入价)/(买入价-止损价)≥1.5，例如：(0.59-0.563)/(0.563-0.544)=1.421≥1.5\n- 低置信度额外下调（16万本金单次≤2.4万）\n\n五、执行策略：\n- 建议采用分批建仓策略，降低建仓风险\n- 严格执行止损纪律，避免单笔亏损过大\n- 定期再评估信号有效性，及时调整策略",
+    "valid_central_count": 2,
+    "signal_count": 2
+  }
+}

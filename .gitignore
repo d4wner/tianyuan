@@ -1,9 +1,56 @@
-# 前端项目示例
+# 忽略Python临时文件和编译文件
 *.py~
 *.pyc
-dist/
-.env
-.vscode/
+__pycache__/
+
+# 忽略虚拟环境目录
+chanlun_env/
+chanlun_env_backup/
+
+# 忽略缓存目录
+.pytest_cache/
+cache/
+
+# 忽略数据目录（包含大量数据文件）
+data/
+
+# 忽略输出目录
+outputs/
+
+# 忽略结果目录
+results/
+
+# 忽略日志目录和文件
+logs/
 *.log
-chanlun_env
-log
+tmp-log.txt
+
+# 忽略编辑器临时文件
+*.swp
+*.swo
+*.swn
+
+# 忽略环境变量文件
+.env
+
+# 忽略编辑器配置目录
+.vscode/
+
+# 忽略临时文件和目录
+tmp
+tmp-
+
+# 忽略构建输出目录
+dist/
+
+# 忽略测试报告和分析文件
+*.html
+510660_2025_report.txt
+new_etfs_test_report.txt
+酒ETF_512690_信号级别判定合理性分析.txt
+酒ETF_512690_信号级别判定结果.txt
+
+# 忽略配置文件的备份
+*.yaml.swm
+*.yaml.swo
+*.yaml.swp

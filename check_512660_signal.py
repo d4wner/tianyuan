@@ -129,7 +129,7 @@ def check_daily_bottom_signals(symbol):
             print(f"   日期: {row['date_str']}")
             print(f"   价格: {row['close']:.3f}")
             print(f"   背驰强度: {row.get('divergence_strength', 0):.3f}")
-            print(f"   背驰指标: {divergence_indicator}")
+            print(f"   背驰指标: {'MACD'}")
             
             # 计算当前价格与信号日价格的关系
             current_price = recent_df.iloc[-1]['close']

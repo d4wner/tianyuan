@@ -32,7 +32,7 @@ class HourlySignalDetector:
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """初始化小时级别信号检测器"""
-        self.config = config or load_config()
+        self.config = config or (load_system_config() if hasattr(sys.modules['src.config'], 'load_system_config') else load_config())
         self.data_fetcher = StockDataFetcher()
         self.calculator = ChanlunCalculator(self.config)
         self.notifier = DingdingNotifier(self.config)

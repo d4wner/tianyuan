@@ -64,7 +64,7 @@ class DataProcessor:
             config: 配置字典
         """
         self.config = config or {}
-        self.api = StockDataAPI(config.get('data_fetcher', {}))
+        self.api = StockDataAPI(self.config.get('data_fetcher', {}))
         self._data_cache = {}
         self._ensure_directories()
     
@@ -339,11 +339,10 @@ class DataProcessor:
         try:
             logger.info(f"获取周线数据: {symbol}, {start_date} 至 {end_date}")
             # 从API获取数据
-            df = self.api.get_weekly_data(
+            df, actual_start, actual_end = self.api.get_weekly_data(
                 symbol,
                 start_date=start_date,
-                end_date=end_date,
-                force_refresh=force_refresh
+                end_date=end_date
             )
             
             if df.empty:

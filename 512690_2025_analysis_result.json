@@ -1,0 +1,110 @@
+{
+  "basic_info": {
+    "code": "512690",
+    "name": "酒ETF",
+    "analysis_year": 2025,
+    "data_range": "2025年1月-2025年11月27日",
+    "data_completeness": {
+      "actual_days": 219,
+      "expected_days": 231,
+      "missing_days": 12
+    },
+    "price_range": {
+      "min": 0.537,
+      "max": 0.662
+    },
+    "annual_volatility": 19.3,
+    "volatility_level": "中波动"
+  },
+  "central_analysis": [
+    {
+      "quarter": "2025年1季度",
+      "trading_range_90": "0.565 - 0.646",
+      "amplitude_90": 14.3,
+      "coverage_rate": 82,
+      "coverage_sample": "10根（46/10）",
+      "support_times": 4,
+      "pressure_times": 1,
+      "central_judgment": "无效中枢（压力次数1<2次）"
+    },
+    {
+      "quarter": "2025年2季度",
+      "trading_range_90": "0.547 - 0.622",
+      "amplitude_90": 13.7,
+      "coverage_rate": 76,
+      "coverage_sample": "10根（45/10）",
+      "support_times": 4,
+      "pressure_times": 2,
+      "central_judgment": "有效中枢"
+    },
+    {
+      "quarter": "2025年3季度",
+      "trading_range_90": "0.555 - 0.625",
+      "amplitude_90": 12.6,
+      "coverage_rate": 79,
+      "coverage_sample": "10根（52/10）",
+      "support_times": 3,
+      "pressure_times": 2,
+      "central_judgment": "有效中枢"
+    },
+    {
+      "quarter": "2025年4季度",
+      "trading_range_90": "0.578 - 0.604",
+      "amplitude_90": 4.5,
+      "coverage_rate": 85,
+      "coverage_sample": "10根（30/10）",
+      "support_times": 4,
+      "pressure_times": 2,
+      "central_judgment": "无效中枢（90%成交区间振幅4.5%<8%）"
+    }
+  ],
+  "signal_analysis": [
+    {
+      "central_name": "2025年2季度",
+      "central_range": "0.547 - 0.622",
+      "signal_type": "破中枢反抽一买",
+      "break_verify": "满足（收盘价0.534≤0.542+创新低）",
+      "rebound_verify": "未满足（无反抽日收盘价≥0.552）",
+      "volume_verify": "未满足（成交量未≥近5日均量×85%）",
+      "macd_verify": "未满足（MACD未形成底背驰+绿柱未缩短30%）",
+      "final_signal_type": "潜在监控信号（低置信度）"
+    },
+    {
+      "central_name": "2025年3季度",
+      "central_range": "0.555 - 0.625",
+      "signal_type": "破中枢反抽一买",
+      "break_verify": "满足（收盘价0.539≤0.549+创新低）",
+      "rebound_verify": "满足（反抽日收盘价0.564≥0.561）",
+      "volume_verify": "未满足（成交量未≥近5日均量×85%）",
+      "macd_verify": "未满足（MACD未形成底背驰+绿柱未缩短30%）",
+      "final_signal_type": "潜在监控信号（待量能和MACD验证）"
+    }
+  ],
+  "trading_params": [
+    {
+      "param_type": "买入价格",
+      "value_rule": "反抽达标日收盘价",
+      "explain": "例如：若Q3中枢反抽达标日收盘价为0.563元，则买入价格为0.563元"
+    },
+    {
+      "param_type": "止损价格",
+      "value_rule": "对应中枢破位最低价×0.99",
+      "explain": "例如：中枢破位最低价为0.549元，则止损价格=0.549×0.99=0.544元"
+    },
+    {
+      "param_type": "止盈价格",
+      "value_rule": "对应中枢中轨",
+      "explain": "例如：中枢中轨=(0.555+0.625)/2=0.59元"
+    },
+    {
+      "param_type": "建议仓位",
+      "value_rule": "≤15%",
+      "explain": "低置信度额外下调（16万本金单次≤2.4万）"
+    },
+    {
+      "param_type": "风险收益比",
+      "value_rule": "≥1.5",
+      "explain": "计算逻辑：(止盈价-买入价)/(买入价-止损价)≥1.5，例如：(0.59-0.563)/(0.563-0.544)=1.421≥1.5"
+    }
+  ]
+}

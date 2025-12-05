@@ -21,7 +21,7 @@ class DingdingNotifier:
         :param config: 可选配置参数，如果为None则自动加载配置
         """
         if config is None:
-            config = load_config()
+            config = load_system_config() if hasattr(sys.modules['src.config'], 'load_system_config') else load_config()
         dingding_config = config.get('dingding', {})
         
         self.access_token = dingding_config.get('access_token', '')
